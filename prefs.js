@@ -11,12 +11,8 @@ const POSITIONS = [
 const FEATURES = [
     ['show-volume', 'Volume and brightness'],
     ['show-battery', 'Charger'],
-    ['show-privacy', 'Microphone and camera in use'],
     ['show-recording', 'Screen recording'],
-    ['show-notifications', 'Notifications'],
-    ['show-timer', 'Timer and stopwatch (Quick Settings)'],
     ['show-bluetooth', 'Bluetooth devices'],
-    ['show-calendar', 'Calendar reminders'],
     ['show-progress', 'Download and copy progress'],
 ];
 

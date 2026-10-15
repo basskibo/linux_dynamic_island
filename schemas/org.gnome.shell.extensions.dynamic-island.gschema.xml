@@ -22,29 +22,13 @@
       <default>true</default>
       <summary>Show charger plugged/unplugged</summary>
     </key>
-    <key name="show-privacy" type="b">
-      <default>true</default>
-      <summary>Show microphone and camera in use</summary>
-    </key>
     <key name="show-recording" type="b">
       <default>true</default>
       <summary>Show screen recording timer</summary>
     </key>
-    <key name="show-notifications" type="b">
-      <default>true</default>
-      <summary>Show notifications</summary>
-    </key>
-    <key name="show-timer" type="b">
-      <default>true</default>
-      <summary>Show Timer toggle in Quick Settings</summary>
-    </key>
     <key name="show-bluetooth" type="b">
       <default>true</default>
       <summary>Show Bluetooth devices connecting</summary>
-    </key>
-    <key name="show-calendar" type="b">
-      <default>true</default>
-      <summary>Remind about calendar events 5 minutes before</summary>
     </key>
     <key name="show-progress" type="b">
       <default>true</default>
