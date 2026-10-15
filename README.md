@@ -22,5 +22,5 @@ Settings: open the Extensions app → Dynamic Island → ⚙, or run `gnome-exte
 ## Build the zip after changes
 
 ```bash
-gnome-extensions pack --force .
+gnome-extensions pack --force --extra-source=island.js --extra-source=sources .
 ```
