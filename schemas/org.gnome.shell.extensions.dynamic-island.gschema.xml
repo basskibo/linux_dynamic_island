@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.dynamic-island" path="/org/gnome/shell/extensions/dynamic-island/">
+    <key name="position" type="s">
+      <choices>
+        <choice value="top-center"/><choice value="top-left"/><choice value="top-right"/>
+        <choice value="bottom-center"/><choice value="bottom-left"/><choice value="bottom-right"/>
+      </choices>
+      <default>'top-center'</default>
+      <summary>Island position on screen</summary>
+    </key>
+    <key name="margin" type="i">
+      <range min="0" max="300"/>
+      <default>6</default>
+      <summary>Distance from the screen edge (px)</summary>
+    </key>
+    <key name="show-volume" type="b">
+      <default>true</default>
+      <summary>Show volume and brightness changes (replaces GNOME pop-up)</summary>
+    </key>
+    <key name="show-battery" type="b">
+      <default>true</default>
+      <summary>Show charger plugged/unplugged</summary>
+    </key>
+    <key name="show-privacy" type="b">
+      <default>true</default>
+      <summary>Show microphone and camera in use</summary>
+    </key>
+    <key name="show-recording" type="b">
+      <default>true</default>
+      <summary>Show screen recording timer</summary>
+    </key>
+    <key name="show-notifications" type="b">
+      <default>true</default>
+      <summary>Show notifications</summary>
+    </key>
+    <key name="show-timer" type="b">
+      <default>true</default>
+      <summary>Show Timer toggle in Quick Settings</summary>
+    </key>
+    <key name="show-bluetooth" type="b">
+      <default>true</default>
+      <summary>Show Bluetooth devices connecting</summary>
+    </key>
+    <key name="show-calendar" type="b">
+      <default>true</default>
+      <summary>Remind about calendar events 5 minutes before</summary>
+    </key>
+    <key name="show-progress" type="b">
+      <default>true</default>
+      <summary>Show download and file copy progress</summary>
+    </key>
+  </schema>
+</schemalist>

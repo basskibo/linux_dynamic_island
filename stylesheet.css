@@ -1,0 +1,37 @@
+.di-island {
+  background-color: #000;
+  border-radius: 20px;
+  padding: 5px 14px 5px 5px;
+  spacing: 10px;
+  transition-duration: 300ms;
+}
+.di-island.expanded { border-radius: 30px; padding: 12px 16px 12px 12px; spacing: 14px; }
+.di-art { border-radius: 999px; background-size: cover; background-color: #1c1c1e; transition-duration: 300ms; }
+.di-island.expanded .di-art { border-radius: 14px; }
+.di-text { max-width: 230px; }
+.di-title { color: #fff; font-weight: bold; font-size: 10pt; }
+.di-island.expanded .di-title { font-size: 11pt; }
+.di-artist { color: #a1a1a6; font-size: 9.5pt; }
+.di-eq { height: 18px; spacing: 3px; }
+.di-bar {
+  width: 3px;
+  border-radius: 2px;
+  background-gradient-direction: vertical;
+  background-gradient-start: #ffc24a;
+  background-gradient-end: #ff6a00;
+}
+.di-btn { color: #fff; padding: 7px; border-radius: 999px; }
+.di-btn:hover { background-color: rgba(255,255,255,0.14); }
+.di-btn:active { background-color: rgba(255,255,255,0.25); }
+.di-btn StIcon { icon-size: 20px; }
+.di-chips { spacing: 6px; min-height: 26px; }
+.di-chip { padding: 3px 5px; border-radius: 999px; }
+.di-chip:hover { background-color: rgba(255,255,255,0.12); }
+.di-chip-box { spacing: 5px; }
+.di-chip-icon { icon-size: 18px; color: #fff; }
+.di-chip-label { color: #fff; font-weight: bold; font-size: 10pt; font-feature-settings: "tnum"; }
+.di-toast { spacing: 12px; padding: 0 4px 0 6px; min-height: 26px; }
+.di-toast-icon { icon-size: 22px; color: #fff; }
+.di-toast-label { color: #fff; font-weight: bold; font-size: 10pt; max-width: 300px; }
+.di-level { height: 8px; border-radius: 4px; background-color: rgba(255,255,255,0.2); }
+.di-level-fill { height: 8px; border-radius: 4px; background-color: #fff; }
