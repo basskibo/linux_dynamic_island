@@ -24,4 +24,3 @@ Settings: open the Extensions app → Dynamic Island → ⚙, or run `gnome-exte
 ```bash
 gnome-extensions pack --force .
 ```
-# linux_dynamic_island
