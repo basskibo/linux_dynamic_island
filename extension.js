@@ -29,6 +29,17 @@ const PLUGGED = [1, 4, 5];
 const MIC_SKIP = ['org.gnome.VolumeControl', 'org.PulseAudio.pavucontrol'];
 const TIMER_PRESETS = [1, 5, 10, 15, 25, 60];
 
+// Island geometry per state: corner radius, padding [top, right, bottom, left], cover size and radius
+const COMPACT = {r: 18, pad: [5, 14, 5, 5], a: ART_SMALL, ar: ART_SMALL / 2};
+const EXPANDED = {r: 30, pad: [12, 16, 12, 12], a: ART_BIG, ar: 14};
+
+// Damped spring (iOS-like: response 0.45s, damping 0.78 → ~2% overshoot), t in seconds → progress
+const OMEGA = 2 * Math.PI / 0.45;
+const ZETA = 0.78;
+const OMEGA_D = OMEGA * Math.sqrt(1 - ZETA * ZETA);
+const spring = t => 1 - Math.exp(-ZETA * OMEGA * t) * (Math.cos(OMEGA_D * t) + ZETA * OMEGA / OMEGA_D * Math.sin(OMEGA_D * t));
+const lerp = (a, b, p) => a + (b - a) * p;
+
 const fmt = secs => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 const toGicon = icon => typeof icon === 'string' ? new Gio.ThemedIcon({name: icon}) : icon;
 
@@ -44,6 +55,10 @@ export default class DynamicIsland extends Extension {
         this._chipMap = new Map();
         this._toastActive = false;
         this._toastId = 0;
+        this._hoverId = 0;
+        this._timeline = null;
+        this._geom = {...COMPACT};
+        this._artBg = '';
         this._timer = null;
         this._recStart = 0;
         this._progress = new Map();
@@ -72,7 +87,15 @@ export default class DynamicIsland extends Extension {
         GLib.source_remove(this._calId);
         if (this._toastId)
             GLib.source_remove(this._toastId);
-        this._eqId = this._secId = this._calId = this._toastId = 0;
+        if (this._hoverId)
+            GLib.source_remove(this._hoverId);
+        this._hoverId = 0;
+        this._timeline?.stop();
+        this._timeline = null;
+        this._eqId = 0;
+        this._secId = 0;
+        this._calId = 0;
+        this._toastId = 0;
         Gio.DBus.session.signal_unsubscribe(this._nameSub);
         Gio.DBus.session.signal_unsubscribe(this._progressSub);
         this._upowerCancel.cancel();
@@ -169,13 +192,23 @@ export default class DynamicIsland extends Extension {
         });
         for (const a of [this._art, this._text, this._eq, this._controls, this._chips, this._toastBox])
             this._island.add_child(a);
-        this._island.connect('notify::hover', () => this._setExpanded(this._island.hover));
+        this._island.connect('notify::hover', () => {
+            // Small hover intent delay so passing the mouse over the island doesn't make it jump
+            if (this._hoverId)
+                GLib.source_remove(this._hoverId);
+            this._hoverId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._island.hover ? 90 : 220, () => {
+                this._hoverId = 0;
+                this._setExpanded(this._island.hover);
+                return GLib.SOURCE_REMOVE;
+            });
+        });
         this._island.connect('button-release-event', (actor, event) => {
             if (event.get_button() !== Clutter.BUTTON_PRIMARY)
                 return Clutter.EVENT_PROPAGATE;
             this._current?.raise();
             return Clutter.EVENT_STOP;
         });
+        this._applyGeom(this._geom);
         this._island.connect('notify::width', () => this._reposition());
         this._island.connect('notify::height', () => this._reposition());
         Main.layoutManager.addTopChrome(this._island);
@@ -202,7 +235,6 @@ export default class DynamicIsland extends Extension {
             const toast = this._toastActive;
             const music = this._hasMusic && !toast;
             const expanded = music && this._expanded;
-            this._island[expanded ? 'add_style_class_name' : 'remove_style_class_name']('expanded');
             this._art.visible = this._text.visible = music;
             this._artist.visible = expanded;
             this._controls.visible = expanded;
@@ -243,30 +275,62 @@ export default class DynamicIsland extends Extension {
         }
     }
 
-    // Applies a layout change, then springs the island (and cover) from the old size to the new one
+    // Applies a layout change, then springs size, corners, padding and cover from the old state to the new one.
+    // Driven per frame and rounded to whole pixels so text and icons stay crisp while moving.
     _morph(change) {
-        const island = this._island, art = this._art;
+        const island = this._island;
         const [w0, h0] = island.get_size();
-        const a0 = art.width;
-        for (const prop of ['width', 'height']) {
-            island.remove_transition(prop);
-            art.remove_transition(prop);
-        }
+        const from = {...this._geom, w: w0, h: h0};
+        this._timeline?.stop();
+        this._timeline = null;
+
         island.set_size(-1, -1);
         change();
-        const a1 = this._expanded && this._hasMusic ? ART_BIG : ART_SMALL;
-        art.set_size(a1, a1);
+        const target = this._expanded && this._hasMusic && !this._toastActive ? EXPANDED : COMPACT;
+        this._applyGeom(target);
         if (!this._shown || !w0)
             return;
 
         const [, w1] = island.get_preferred_width(-1);
         const [, h1] = island.get_preferred_height(w1);
-        if (w1 === w0 && h1 === h0)
+        if (w1 === w0 && h1 === h0 && target === from.target)
             return;
-        island.set_size(w0, h0);
-        art.set_size(a0, a0);
-        island.ease({width: w1, height: h1, duration: 480, mode: SPRING, onComplete: () => island.set_size(-1, -1)});
-        art.ease({width: a1, height: a1, duration: 480, mode: SPRING});
+        const to = {...target, w: w1, h: h1};
+        this._applyGeom(from);
+
+        const timeline = new Clutter.Timeline({actor: island, duration: 650});
+        timeline.connect('new-frame', () => {
+            const p = spring(timeline.get_elapsed_time() / 1000);
+            this._applyGeom({
+                target,
+                r: lerp(from.r, to.r, p),
+                pad: from.pad.map((v, i) => lerp(v, to.pad[i], p)),
+                a: lerp(from.a, to.a, p),
+                ar: lerp(from.ar, to.ar, p),
+                w: lerp(from.w, to.w, p),
+                h: lerp(from.h, to.h, p),
+            });
+        });
+        timeline.connect('stopped', (t, finished) => {
+            if (!finished)
+                return;
+            this._applyGeom(target);
+            island.set_size(-1, -1);
+            this._timeline = null;
+        });
+        this._timeline = timeline;
+        timeline.start();
+    }
+
+    _applyGeom(g) {
+        this._geom = {target: g.target ?? g, r: g.r, pad: g.pad, a: g.a, ar: g.ar};
+        const px = v => `${Math.max(0, Math.round(v))}px`;
+        this._island.style = `border-radius: ${px(g.r)}; padding: ${g.pad.map(px).join(' ')};`;
+        const a = Math.round(g.a);
+        this._art.set_size(a, a);
+        this._art.style = `${this._artBg} border-radius: ${px(g.ar)};`;
+        if (g.w !== undefined)
+            this._island.set_size(Math.round(g.w), Math.round(g.h));
     }
 
     // Temporary takeover of the island (volume, charger, notifications...)
@@ -440,7 +504,8 @@ export default class DynamicIsland extends Extension {
 
     _setArt(url) {
         if (!url.startsWith('http')) {
-            this._art.style = url.startsWith('file://') ? `background-image: url("${url}");` : '';
+            this._artBg = url.startsWith('file://') ? `background-image: url("${url}");` : '';
+            this._applyGeom(this._geom);
             return;
         }
         // St can't load remote images, so download Spotify-style https covers into a cache (via GVfs)
@@ -448,8 +513,10 @@ export default class DynamicIsland extends Extension {
         GLib.mkdir_with_parents(dir, 0o755);
         const dest = Gio.File.new_for_path(`${dir}/${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, url, -1)}`);
         const apply = () => {
-            if (this._island)
-                this._art.style = `background-image: url("${dest.get_uri()}");`;
+            if (!this._island)
+                return;
+            this._artBg = `background-image: url("${dest.get_uri()}");`;
+            this._applyGeom(this._geom);
         };
         if (dest.query_exists(null))
             return apply();

@@ -1,16 +1,7 @@
-.di-island {
-  background-color: #000;
-  border-radius: 20px;
-  padding: 5px 14px 5px 5px;
-  spacing: 10px;
-  transition-duration: 300ms;
-}
-.di-island.expanded { border-radius: 30px; padding: 12px 16px 12px 12px; spacing: 14px; }
-.di-art { border-radius: 999px; background-size: cover; background-color: #1c1c1e; transition-duration: 300ms; }
-.di-island.expanded .di-art { border-radius: 14px; }
+.di-island { background-color: #000; spacing: 12px; }
+.di-art { background-size: cover; background-color: #1c1c1e; }
 .di-text { max-width: 230px; }
 .di-title { color: #fff; font-weight: bold; font-size: 10pt; }
-.di-island.expanded .di-title { font-size: 11pt; }
 .di-artist { color: #a1a1a6; font-size: 9.5pt; }
 .di-eq { height: 18px; spacing: 3px; }
 .di-bar {
