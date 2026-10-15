@@ -11,9 +11,9 @@ const ART_SMALL = 26;
 const ART_BIG = 56;
 const BAR_W = 170;
 
-// Island geometry per state: corner radius, padding [top, right, bottom, left], cover size and radius
-const COMPACT = {r: 18, pad: [5, 14, 5, 5], a: ART_SMALL, ar: ART_SMALL / 2};
-const EXPANDED = {r: 30, pad: [12, 16, 12, 12], a: ART_BIG, ar: 14};
+// padding is [top, right, bottom, left]
+const COMPACT = {radius: 18, padding: [5, 14, 5, 5], artSize: ART_SMALL, artRadius: ART_SMALL / 2};
+const EXPANDED = {radius: 30, padding: [12, 16, 12, 12], artSize: ART_BIG, artRadius: 14};
 
 // Damped spring (response 0.45s, damping 0.78 → ~2% overshoot), t in seconds → progress
 const OMEGA = 2 * Math.PI / 0.45;
@@ -46,8 +46,10 @@ class Island extends St.BoxLayout {
         this._toastId = 0;
         this._hoverId = 0;
         this._timeline = null;
-        this._geom = {...COMPACT};
-        this._artBg = '';
+        this._layout = COMPACT;
+        this._geometry = COMPACT;
+        this._artBackground = '';
+        this._artCancellable = new Gio.Cancellable();
 
         this._art = new St.Bin({style_class: 'di-art', pivot_point: new Graphene.Point({x: 0.5, y: 0.5})});
         this.add_child(this._art);
@@ -93,7 +95,7 @@ class Island extends St.BoxLayout {
         this._toastBox.add_child(this._toastLabel);
         this.add_child(this._toastBox);
 
-        this._applyGeom(this._geom);
+        this._applyGeometry(COMPACT);
 
         this.connect('notify::hover', () => this._onHover());
         this.connect('notify::width', () => this._reposition());
@@ -111,6 +113,7 @@ class Island extends St.BoxLayout {
         if (this._hoverId)
             GLib.source_remove(this._hoverId);
         this._timeline?.stop();
+        this._artCancellable.cancel();
         Main.layoutManager.disconnectObject(this);
         this._settings.disconnectObject(this);
     }
@@ -127,8 +130,6 @@ class Island extends St.BoxLayout {
         button.connect('clicked', callback);
         return button;
     }
-
-    // ---------- Public API used by the extension ----------
 
     setPlayer(player) {
         this._player = player;
@@ -209,8 +210,6 @@ class Island extends St.BoxLayout {
             this._refresh();
     }
 
-    // ---------- Layout and animation ----------
-
     // Shows/hides each part for the current state, springing the island to its new size
     _refresh() {
         const hasIndicators = this._indicators.size > 0;
@@ -273,45 +272,43 @@ class Island extends St.BoxLayout {
         }
     }
 
-    // Applies a layout change, then springs size, corners, padding and cover from the old state to the new one.
-    // Driven per frame and rounded to whole pixels so text and icons stay crisp while moving.
+    // Applies a layout change, then springs size, corners, padding and cover to the new state.
+    // Animated per frame and rounded to whole pixels so text and icons stay sharp while moving.
     _morph(change) {
-        const [w0, h0] = this.get_size();
-        const from = {...this._geom, w: w0, h: h0};
+        const [fromWidth, fromHeight] = this.get_size();
+        const from = this._geometry;
+        const fromLayout = this._layout;
         this._timeline?.stop();
         this._timeline = null;
 
         this.set_size(-1, -1);
         change();
-        const target = this._expanded && this._hasMusic && !this._toastActive ? EXPANDED : COMPACT;
-        this._applyGeom(target);
-        if (!this._shown || !w0)
+        this._layout = this._expanded && this._hasMusic && !this._toastActive ? EXPANDED : COMPACT;
+        const to = this._layout;
+        this._applyGeometry(to);
+        if (!this._shown || !fromWidth)
             return;
 
-        const [, w1] = this.get_preferred_width(-1);
-        const [, h1] = this.get_preferred_height(w1);
-        if (w1 === w0 && h1 === h0 && target === from.target)
+        const [, toWidth] = this.get_preferred_width(-1);
+        const [, toHeight] = this.get_preferred_height(toWidth);
+        if (toWidth === fromWidth && toHeight === fromHeight && to === fromLayout)
             return;
-        const to = {...target, w: w1, h: h1};
-        this._applyGeom(from);
+        this._applyGeometry(from, fromWidth, fromHeight);
 
         const timeline = new Clutter.Timeline({actor: this, duration: 650});
         timeline.connect('new-frame', () => {
             const p = spring(timeline.get_elapsed_time() / 1000);
-            this._applyGeom({
-                target,
-                r: lerp(from.r, to.r, p),
-                pad: from.pad.map((v, i) => lerp(v, to.pad[i], p)),
-                a: lerp(from.a, to.a, p),
-                ar: lerp(from.ar, to.ar, p),
-                w: lerp(from.w, to.w, p),
-                h: lerp(from.h, to.h, p),
-            });
+            this._applyGeometry({
+                radius: lerp(from.radius, to.radius, p),
+                padding: from.padding.map((v, i) => lerp(v, to.padding[i], p)),
+                artSize: lerp(from.artSize, to.artSize, p),
+                artRadius: lerp(from.artRadius, to.artRadius, p),
+            }, lerp(fromWidth, toWidth, p), lerp(fromHeight, toHeight, p));
         });
         timeline.connect('stopped', (t, finished) => {
             if (!finished)
                 return;
-            this._applyGeom(target);
+            this._applyGeometry(to);
             this.set_size(-1, -1);
             this._timeline = null;
         });
@@ -319,15 +316,15 @@ class Island extends St.BoxLayout {
         timeline.start();
     }
 
-    _applyGeom(g) {
-        this._geom = {target: g.target ?? g, r: g.r, pad: g.pad, a: g.a, ar: g.ar};
+    _applyGeometry(geometry, width, height) {
+        this._geometry = geometry;
         const px = v => `${Math.max(0, Math.round(v))}px`;
-        this.style = `border-radius: ${px(g.r)}; padding: ${g.pad.map(px).join(' ')};`;
-        const a = Math.round(g.a);
-        this._art.set_size(a, a);
-        this._art.style = `${this._artBg} border-radius: ${px(g.ar)};`;
-        if (g.w !== undefined)
-            this.set_size(Math.round(g.w), Math.round(g.h));
+        this.style = `border-radius: ${px(geometry.radius)}; padding: ${geometry.padding.map(px).join(' ')};`;
+        const artSize = Math.round(geometry.artSize);
+        this._art.set_size(artSize, artSize);
+        this._art.style = `${this._artBackground} border-radius: ${px(geometry.artRadius)};`;
+        if (width !== undefined)
+            this.set_size(Math.round(width), Math.round(height));
     }
 
     _swapTrack(player) {
@@ -371,40 +368,40 @@ class Island extends St.BoxLayout {
 
     _setArt(url) {
         if (!url.startsWith('http')) {
-            this._artBg = url.startsWith('file://') ? `background-image: url("${url}");` : '';
-            this._applyGeom(this._geom);
+            this._setArtBackground(url.startsWith('file://') ? url : null);
             return;
         }
-        // St can't load remote images, so download Spotify-style https covers into a cache (via GVfs)
+        // St can't load remote images, so https covers (Spotify) are downloaded to a cache first
         const dir = GLib.build_filenamev([GLib.get_user_cache_dir(), 'dynamic-island']);
         GLib.mkdir_with_parents(dir, 0o755);
         const dest = Gio.File.new_for_path(`${dir}/${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, url, -1)}`);
-        const apply = () => {
-            this._artBg = `background-image: url("${dest.get_uri()}");`;
-            this._applyGeom(this._geom);
-        };
         if (dest.query_exists(null)) {
-            apply();
+            this._setArtBackground(dest.get_uri());
             return;
         }
-        Gio.File.new_for_uri(url).copy_async(dest, Gio.FileCopyFlags.OVERWRITE, GLib.PRIORITY_DEFAULT, null, null, (file, res) => {
-            try {
-                file.copy_finish(res);
-            } catch (e) {
-                console.warn(`dynamic-island: cover download failed: ${e.message}`);
-                return;
-            }
-            // The island may have been destroyed while the download was running
-            if (this._art)
-                apply();
-        });
+        Gio.File.new_for_uri(url).copy_async(dest, Gio.FileCopyFlags.OVERWRITE, GLib.PRIORITY_DEFAULT,
+            this._artCancellable, null, (file, res) => {
+                try {
+                    file.copy_finish(res);
+                } catch (e) {
+                    if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        console.warn(`dynamic-island: cover download failed: ${e.message}`);
+                    return;
+                }
+                this._setArtBackground(dest.get_uri());
+            });
+    }
+
+    _setArtBackground(uri) {
+        this._artBackground = uri ? `background-image: url("${uri}");` : '';
+        this._applyGeometry(this._geometry);
     }
 
     _tickEq() {
         if (!this.visible || !this._eq.visible)
             return GLib.SOURCE_CONTINUE;
         const playing = this._player?.status === 'Playing';
-        for (const bar of this._eq) {
+        for (const bar of this._eq.get_children()) {
             bar.ease({
                 height: playing ? 4 + Math.round(Math.random() * 14) : 3,
                 duration: 240,
