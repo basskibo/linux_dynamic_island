@@ -5,6 +5,8 @@
       <choices>
         <choice value="top-center"/><choice value="top-left"/><choice value="top-right"/>
         <choice value="bottom-center"/><choice value="bottom-left"/><choice value="bottom-right"/>
+        <choice value="panel-left"/><choice value="panel-center-left"/>
+        <choice value="panel-center-right"/><choice value="panel-right"/>
       </choices>
       <default>'top-center'</default>
       <summary>Island position on screen</summary>

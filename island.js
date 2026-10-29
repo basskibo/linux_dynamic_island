@@ -14,6 +14,16 @@ const BAR_W = 170;
 // padding is [top, right, bottom, left]
 const COMPACT = {radius: 18, padding: [5, 14, 5, 5], artSize: ART_SMALL, artRadius: ART_SMALL / 2};
 const EXPANDED = {radius: 30, padding: [12, 16, 12, 12], artSize: ART_BIG, artRadius: 14};
+// Slimmer resting island so it fits inside the top bar
+const PANEL_COMPACT = {...COMPACT, padding: [3, 12, 3, 3]};
+
+// Top bar positions: [panel box, index in box, which way the expanded island grows (0 right, 1 left)]
+const PANEL_SLOTS = {
+    'panel-left': ['_leftBox', -1, 0],
+    'panel-center-left': ['_centerBox', 0, 1],
+    'panel-center-right': ['_centerBox', -1, 0],
+    'panel-right': ['_rightBox', 0, 1],
+};
 
 // Damped spring (response 0.45s, damping 0.78 → ~2% overshoot), t in seconds → progress
 const OMEGA = 2 * Math.PI / 0.45;
@@ -48,6 +58,9 @@ class Island extends St.BoxLayout {
         this._timeline = null;
         this._layout = COMPACT;
         this._geometry = COMPACT;
+        this._slot = null;
+        this._position = null;
+        this._restWidth = 0;
         this._artBackground = '';
         this._artCancellable = new Gio.Cancellable();
 
@@ -95,14 +108,15 @@ class Island extends St.BoxLayout {
         this._toastBox.add_child(this._toastLabel);
         this.add_child(this._toastBox);
 
-        this._applyGeometry(COMPACT);
+        this._place();
+        this._applyGeometry(this._compact());
 
         this.connect('notify::hover', () => this._onHover());
         this.connect('notify::width', () => this._reposition());
         this.connect('notify::height', () => this._reposition());
         this.connect('destroy', () => this._onDestroy());
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
-        settings.connectObject('changed', () => this._reposition(), this);
+        settings.connectObject('changed::position', () => this._place(), 'changed', () => this._reposition(), this);
         this._eqId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 260, () => this._tickEq());
     }
 
@@ -116,6 +130,43 @@ class Island extends St.BoxLayout {
         this._artCancellable.cancel();
         Main.layoutManager.disconnectObject(this);
         this._settings.disconnectObject(this);
+        this._slot?.destroy();
+    }
+
+    _compact() {
+        return this._slot ? PANEL_COMPACT : COMPACT;
+    }
+
+    // Puts the island in a top bar slot, or floating as top chrome for the screen positions
+    _place() {
+        const position = this._settings.get_string('position');
+        if (position === this._position)
+            return;
+        this._position = position;
+        if (this._slot) {
+            this._slot.remove_child(this);
+            this._slot.destroy();
+            this._slot = null;
+        } else if (this.get_parent()) {
+            Main.layoutManager.removeChrome(this);
+        }
+
+        const target = PANEL_SLOTS[position];
+        if (target) {
+            // Empty slot reserves room for the resting island; the expanded island overlaps its neighbours
+            this._slot = new St.Widget({width: 0});
+            this._slot.connect('notify::width', () => this._reposition());
+            Main.panel[target[0]].insert_child_at_index(this._slot, target[1]);
+            this._slot.add_child(this);
+        } else {
+            Main.layoutManager.addTopChrome(this);
+        }
+        this._refresh();
+    }
+
+    _fitSlot() {
+        if (this._slot && this._layout !== EXPANDED)
+            this._slot.ease({width: this._shown ? this._restWidth : 0, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
     }
 
     vfunc_button_release_event(event) {
@@ -225,6 +276,7 @@ class Island extends St.BoxLayout {
             this._toastBox.visible = this._toastActive;
         });
         this._setShown(this._hasMusic || hasIndicators || this._toastActive);
+        this._fitSlot();
     }
 
     _setShown(shown) {
@@ -283,13 +335,15 @@ class Island extends St.BoxLayout {
 
         this.set_size(-1, -1);
         change();
-        this._layout = this._expanded && this._hasMusic && !this._toastActive ? EXPANDED : COMPACT;
+        this._layout = this._expanded && this._hasMusic && !this._toastActive ? EXPANDED : this._compact();
         const to = this._layout;
         this._applyGeometry(to);
+        const [, toWidth] = this.get_preferred_width(-1);
+        if (to !== EXPANDED)
+            this._restWidth = toWidth;
         if (!this._shown || !fromWidth)
             return;
 
-        const [, toWidth] = this.get_preferred_width(-1);
         const [, toHeight] = this.get_preferred_height(toWidth);
         if (toWidth === fromWidth && toHeight === fromHeight && to === fromLayout)
             return;
@@ -412,6 +466,12 @@ class Island extends St.BoxLayout {
     }
 
     _reposition() {
+        if (this._slot) {
+            const grow = PANEL_SLOTS[this._position][2];
+            this.set_position(Math.round((this._slot.width - this.width) * grow),
+                Math.max(0, Math.round((Main.panel.height - this.height) / 2)));
+            return;
+        }
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor)
             return;

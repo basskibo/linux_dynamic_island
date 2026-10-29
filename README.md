@@ -8,7 +8,8 @@
 
 
 iOS-style live island that shows what's playing (Spotify, YouTube in browsers, any MPRIS player).
-Hover to expand with controls, click to open the player. Position is configurable in the extension settings.
+Hover to expand with controls, click to open the player. Position is configurable in the extension settings: floating at a screen edge, or inside the top bar
+(after Activities, left/right of the clock, or before the system menu).
 
 Supports GNOME Shell 46–48.
 

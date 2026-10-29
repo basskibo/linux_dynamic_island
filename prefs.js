@@ -6,6 +6,8 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 const POSITIONS = [
     ['top-center', 'Top center'], ['top-left', 'Top left'], ['top-right', 'Top right'],
     ['bottom-center', 'Bottom center'], ['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right'],
+    ['panel-left', 'Top bar, left (after Activities)'], ['panel-center-left', 'Top bar, left of clock'],
+    ['panel-center-right', 'Top bar, right of clock'], ['panel-right', 'Top bar, right (before system menu)'],
 ];
 
 const FEATURES = [
@@ -31,7 +33,7 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
 
         const margin = new Adw.SpinRow({
             title: 'Distance from edge',
-            subtitle: 'Pixels',
+            subtitle: 'Pixels, not used in the top bar',
             adjustment: new Gtk.Adjustment({lower: 0, upper: 300, step_increment: 1, page_increment: 10}),
         });
         settings.bind('margin', margin, 'value', Gio.SettingsBindFlags.DEFAULT);

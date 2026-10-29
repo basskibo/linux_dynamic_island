@@ -1,4 +1,3 @@
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {Island} from './island.js';
@@ -15,7 +14,6 @@ export default class DynamicIslandExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._island = new Island(this._settings);
-        Main.layoutManager.addTopChrome(this._island);
         this._sources = SOURCES.map(Source => new Source(this._island, this._settings));
     }
 
