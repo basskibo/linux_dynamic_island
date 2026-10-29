@@ -17,6 +17,18 @@
       <default>6</default>
       <summary>Distance from the screen edge (px)</summary>
     </key>
+    <key name="width" type="i">
+      <range min="0" max="800"/>
+      <default>0</default>
+      <summary>Minimum island width (px), 0 sizes it to the content</summary>
+    </key>
+    <key name="expand-on" type="s">
+      <choices>
+        <choice value="hover"/><choice value="click"/><choice value="both"/>
+      </choices>
+      <default>'hover'</default>
+      <summary>What opens the details view</summary>
+    </key>
     <key name="eq-style" type="s">
       <choices>
         <choice value="bars"/><choice value="spectrum"/><choice value="segments"/>

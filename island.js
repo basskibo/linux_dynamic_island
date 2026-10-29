@@ -106,10 +106,10 @@ class Island extends St.BoxLayout {
         this.add_child(this._art);
 
         // Gap the clock shows through in notch mode
-        this._notch = new St.Widget({visible: false});
+        this._notch = new St.Widget({visible: false, x_expand: true});
         this._notch.connect('notify::x', () => this._reposition());
 
-        this._text = new St.BoxLayout({style_class: 'di-text', vertical: true, y_align: Clutter.ActorAlign.CENTER});
+        this._text = new St.BoxLayout({style_class: 'di-text', vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._source = new St.BoxLayout({style_class: 'di-source', visible: false});
         this._sourceIcon = new St.Icon({style_class: 'di-source-icon'});
         this._sourceLabel = new St.Label({style_class: 'di-source-label', y_align: Clutter.ActorAlign.CENTER});
@@ -172,6 +172,7 @@ class Island extends St.BoxLayout {
         settings.connectObject(
             'changed::position', () => this._place(),
             'changed::eq-style', () => this._setEqStyle(),
+            'changed::width', () => this._refresh(),
             'changed::accent-color', () => {
                 this._accent = accentGradient(settings.get_string('accent-color'));
                 this._eq.queue_repaint();
@@ -193,6 +194,8 @@ class Island extends St.BoxLayout {
         this._settings.disconnectObject(this);
         this._slot?.destroy();
         Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
+        Main.panel.statusArea.dateMenu?.disconnectObject(this);
+        Main.panel.statusArea.dateMenu?.menu.disconnectObject(this);
     }
 
     _isNotch() {
@@ -205,7 +208,8 @@ class Island extends St.BoxLayout {
             return EXPANDED;
         const padding = [...EXPANDED.padding];
         padding[0] += Main.panel.height;
-        return {...EXPANDED, padding};
+        // Hangs from the top edge like the macOS notch: square top, round bottom
+        return {...EXPANDED, padding, topRadius: 0};
     }
 
     _compact() {
@@ -219,6 +223,8 @@ class Island extends St.BoxLayout {
             return;
         this._position = position;
         Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
+        Main.panel.statusArea.dateMenu?.disconnectObject(this);
+        Main.panel.statusArea.dateMenu?.menu.disconnectObject(this);
         if (this._slot) {
             this._slot.remove_child(this);
             this._slot.destroy();
@@ -241,6 +247,9 @@ class Island extends St.BoxLayout {
                     this._reposition();
                 };
                 clock.connectObject('notify::width', sync, 'notify::x', sync, this);
+                const dateMenu = Main.panel.statusArea.dateMenu;
+                dateMenu.connectObject('notify::hover', () => this._onHover(), this);
+                dateMenu.menu.connectObject('open-state-changed', () => this._onHover(), this);
                 sync();
             }
         } else {
@@ -263,6 +272,11 @@ class Island extends St.BoxLayout {
     vfunc_button_release_event(event) {
         if (event.get_button() !== Clutter.BUTTON_PRIMARY)
             return Clutter.EVENT_PROPAGATE;
+        // First click opens the details, the next one opens the player
+        if (!this._expanded && this._hasMusic && this._settings.get_string('expand-on') !== 'hover') {
+            this._setExpanded(true);
+            return Clutter.EVENT_STOP;
+        }
         this._player?.raise();
         return Clutter.EVENT_STOP;
     }
@@ -400,9 +414,18 @@ class Island extends St.BoxLayout {
         // Small hover intent delay so passing the mouse over the island doesn't make it jump
         if (this._hoverId)
             GLib.source_remove(this._hoverId);
-        this._hoverId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this.hover ? 90 : 220, () => {
+        this._hoverId = 0;
+        const dateMenu = Main.panel.statusArea.dateMenu;
+        // Open calendar collapses the island so it doesn't sit under the menu
+        const hover = this._isNotch()
+            ? (this.hover || dateMenu.hover) && !dateMenu.menu.isOpen
+            : this.hover;
+        // In click mode hovering only closes the details (when the pointer leaves)
+        if (hover && this._settings.get_string('expand-on') === 'click')
+            return;
+        this._hoverId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, hover ? 90 : 220, () => {
             this._hoverId = 0;
-            this._setExpanded(this.hover);
+            this._setExpanded(hover);
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -451,6 +474,7 @@ class Island extends St.BoxLayout {
             const p = spring(timeline.get_elapsed_time() / 1000);
             this._applyGeometry({
                 radius: lerp(from.radius, to.radius, p),
+                topRadius: lerp(from.topRadius ?? from.radius, to.topRadius ?? to.radius, p),
                 padding: from.padding.map((v, i) => lerp(v, to.padding[i], p)),
                 artSize: lerp(from.artSize, to.artSize, p),
                 artRadius: lerp(from.artRadius, to.artRadius, p),
@@ -470,7 +494,12 @@ class Island extends St.BoxLayout {
     _applyGeometry(geometry, width, height) {
         this._geometry = geometry;
         const px = v => `${Math.max(0, Math.round(v))}px`;
-        this.style = `border-radius: ${px(geometry.radius)}; padding: ${geometry.padding.map(px).join(' ')};`;
+        const top = px(geometry.topRadius ?? geometry.radius);
+        const bottom = px(geometry.radius);
+        // 0 width setting = size to content; music layouts only, toasts keep their own size
+        const minWidth = this._hasMusic && !this._toastActive ? this._settings.get_int('width') : 0;
+        this.style = `border-radius: ${top} ${top} ${bottom} ${bottom}; padding: ${geometry.padding.map(px).join(' ')};` +
+            (minWidth ? ` min-width: ${minWidth}px;` : '');
         const artSize = Math.round(geometry.artSize);
         this._art.set_size(artSize, artSize);
         this._art.style = `${this._artBackground} border-radius: ${px(geometry.artRadius)};`;

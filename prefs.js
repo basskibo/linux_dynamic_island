@@ -17,6 +17,8 @@ const SHAPES = [
     ['solid', 'Solid'], ['wave', 'Wave'], ['ribbon', 'Ribbon'],
 ];
 
+const EXPAND_ON = [['hover', 'Hover'], ['click', 'Click'], ['both', 'Hover or click']];
+
 const FEATURES = [
     ['show-volume', 'Volume and brightness'],
     ['show-battery', 'Charger'],
@@ -45,8 +47,25 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         });
         settings.bind('margin', margin, 'value', Gio.SettingsBindFlags.DEFAULT);
 
+        const width = new Adw.SpinRow({
+            title: 'Width',
+            subtitle: 'Minimum width in pixels, 0 fits the content',
+            adjustment: new Gtk.Adjustment({lower: 0, upper: 800, step_increment: 10, page_increment: 50}),
+        });
+        settings.bind('width', width, 'value', Gio.SettingsBindFlags.DEFAULT);
+
         group.add(position);
         group.add(margin);
+        const expandOn = new Adw.ComboRow({
+            title: 'Open details on',
+            subtitle: 'With click, a second click opens the player',
+            model: Gtk.StringList.new(EXPAND_ON.map(p => p[1])),
+            selected: Math.max(0, EXPAND_ON.findIndex(p => p[0] === settings.get_string('expand-on'))),
+        });
+        expandOn.connect('notify::selected', () => settings.set_string('expand-on', EXPAND_ON[expandOn.selected][0]));
+
+        group.add(width);
+        group.add(expandOn);
         page.add(group);
 
         const visualizer = new Adw.PreferencesGroup({title: 'Music visualizer'});
