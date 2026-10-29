@@ -7,6 +7,7 @@
         <choice value="bottom-center"/><choice value="bottom-left"/><choice value="bottom-right"/>
         <choice value="panel-left"/><choice value="panel-center-left"/>
         <choice value="panel-center-right"/><choice value="panel-right"/>
+        <choice value="panel-notch"/>
       </choices>
       <default>'top-center'</default>
       <summary>Island position on screen</summary>
@@ -15,6 +16,18 @@
       <range min="0" max="300"/>
       <default>6</default>
       <summary>Distance from the screen edge (px)</summary>
+    </key>
+    <key name="eq-style" type="s">
+      <choices>
+        <choice value="bars"/><choice value="spectrum"/><choice value="segments"/>
+        <choice value="solid"/><choice value="wave"/><choice value="ribbon"/>
+      </choices>
+      <default>'bars'</default>
+      <summary>Shape of the music visualizer</summary>
+    </key>
+    <key name="accent-color" type="s">
+      <default>'#ff6a00'</default>
+      <summary>Visualizer color (#rrggbb)</summary>
     </key>
     <key name="show-volume" type="b">
       <default>true</default>

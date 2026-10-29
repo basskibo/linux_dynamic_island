@@ -1,3 +1,4 @@
+import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -13,12 +14,14 @@ const BAR_W = 170;
 
 // padding is [top, right, bottom, left]
 const COMPACT = {radius: 18, padding: [5, 14, 5, 5], artSize: ART_SMALL, artRadius: ART_SMALL / 2};
-const EXPANDED = {radius: 30, padding: [12, 16, 12, 12], artSize: ART_BIG, artRadius: 14};
+const EXPANDED = {radius: 30, padding: [12, 16, 12, 12], artSize: ART_BIG, artRadius: 14, expanded: true};
 // Slimmer resting island so it fits inside the top bar
 const PANEL_COMPACT = {...COMPACT, padding: [3, 12, 3, 3]};
 
-// Top bar positions: [panel box, index in box, which way the expanded island grows (0 right, 1 left)]
+// Top bar positions: [panel box, index in box, which way the expanded island grows (0 right, 1 left)].
+// 'panel-notch' wraps around the clock like the iPhone island around the camera.
 const PANEL_SLOTS = {
+    'panel-notch': ['_centerBox', 0, null],
     'panel-left': ['_leftBox', -1, 0],
     'panel-center-left': ['_centerBox', 0, 1],
     'panel-center-right': ['_centerBox', -1, 0],
@@ -31,6 +34,37 @@ const ZETA = 0.78;
 const OMEGA_D = OMEGA * Math.sqrt(1 - ZETA * ZETA);
 const spring = t => 1 - Math.exp(-ZETA * OMEGA * t) * (Math.cos(OMEGA_D * t) + ZETA * OMEGA / OMEGA_D * Math.sin(OMEGA_D * t));
 const lerp = (a, b, p) => a + (b - a) * p;
+
+// Visualizer size per shape; levels animate toward random targets while playing
+const EQ_WIDTH = {bars: 21, spectrum: 30, segments: 23, solid: 30, wave: 30, ribbon: 30};
+const EQ_HEIGHT = 18;
+const EQ_LEVELS = 8;
+
+const ICONS = Gio.File.new_for_uri(import.meta.url).get_parent().get_child('icons');
+const icon = name => new Gio.FileIcon({file: ICONS.get_child(`${name}.svg`)});
+
+// Gradient for the accent: the top is shifted toward yellow and lighter, so #ff6a00 gives the original #ffc24a → #ff6a00
+function accentGradient(hex) {
+    const rgb = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [r, g, b] = rgb;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, l = (max + min) / 2;
+    const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+    const h = !d ? 0 : max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    const hue = (h * 60 + 15 + 360) % 360, light = Math.min(l + 0.14, 0.9);
+    const a = s * Math.min(light, 1 - light);
+    const k = n => (n + hue / 30) % 12;
+    return [[0, 8, 4].map(n => light - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))), rgb];
+}
+
+function roundedRect(cr, x, y, w, h) {
+    const r = Math.min(w, h) / 2;
+    cr.newSubPath();
+    cr.arc(x + w - r, y + r, r, -Math.PI / 2, 0);
+    cr.arc(x + w - r, y + h - r, r, 0, Math.PI / 2);
+    cr.arc(x + r, y + h - r, r, Math.PI / 2, Math.PI);
+    cr.arc(x + r, y + r, r, Math.PI, 1.5 * Math.PI);
+    cr.closePath();
+}
 
 const toGicon = icon => typeof icon === 'string' ? new Gio.ThemedIcon({name: icon}) : icon;
 
@@ -63,11 +97,25 @@ class Island extends St.BoxLayout {
         this._restWidth = 0;
         this._artBackground = '';
         this._artCancellable = new Gio.Cancellable();
+        this._levels = new Array(EQ_LEVELS).fill(0);
+        this._targets = new Array(EQ_LEVELS).fill(0);
+        this._phase = 0;
+        this._accent = accentGradient(settings.get_string('accent-color'));
 
         this._art = new St.Bin({style_class: 'di-art', pivot_point: new Graphene.Point({x: 0.5, y: 0.5})});
         this.add_child(this._art);
 
+        // Gap the clock shows through in notch mode
+        this._notch = new St.Widget({visible: false});
+        this._notch.connect('notify::x', () => this._reposition());
+
         this._text = new St.BoxLayout({style_class: 'di-text', vertical: true, y_align: Clutter.ActorAlign.CENTER});
+        this._source = new St.BoxLayout({style_class: 'di-source', visible: false});
+        this._sourceIcon = new St.Icon({style_class: 'di-source-icon'});
+        this._sourceLabel = new St.Label({style_class: 'di-source-label', y_align: Clutter.ActorAlign.CENTER});
+        this._source.add_child(this._sourceIcon);
+        this._source.add_child(this._sourceLabel);
+        this._text.add_child(this._source);
         this._title = new St.Label({style_class: 'di-title'});
         this._artist = new St.Label({style_class: 'di-artist', visible: false});
         this._title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
@@ -75,17 +123,22 @@ class Island extends St.BoxLayout {
         this._text.add_child(this._title);
         this._text.add_child(this._artist);
         this.add_child(this._text);
+        this.add_child(this._notch);
 
-        this._eq = new St.BoxLayout({style_class: 'di-eq', y_align: Clutter.ActorAlign.CENTER});
-        for (let i = 0; i < 4; i++)
-            this._eq.add_child(new St.Widget({style_class: 'di-bar', height: 3, y_align: Clutter.ActorAlign.CENTER}));
+        this._eq = new St.DrawingArea({height: EQ_HEIGHT, y_align: Clutter.ActorAlign.CENTER});
+        this._eq.connect('repaint', area => this._drawEq(area));
+        this._eq.width = this._eqWidth();
         this.add_child(this._eq);
+        this._eqTimeline = new Clutter.Timeline({actor: this._eq, duration: 1000, repeat_count: -1});
+        this._eqTimeline.connect('new-frame', () => this._stepEq(this._eqTimeline.get_delta() / 1000));
+        this._eqTimeline.start();
 
         this._controls = new St.BoxLayout({visible: false, y_align: Clutter.ActorAlign.CENTER});
-        this._controls.add_child(this._button('media-skip-backward-symbolic', () => this._player?.previous()));
-        this._playButton = this._button('media-playback-pause-symbolic', () => this._player?.playPause());
+        this._controls.add_child(this._button('previous', () => this._player?.previous()));
+        this._playButton = this._button('pause', () => this._player?.playPause());
+        this._playButton.add_style_class_name('di-play');
         this._controls.add_child(this._playButton);
-        this._controls.add_child(this._button('media-skip-forward-symbolic', () => this._player?.next()));
+        this._controls.add_child(this._button('next', () => this._player?.next()));
         this.add_child(this._controls);
 
         this._indicatorBox = new St.BoxLayout({style_class: 'di-indicators', visible: false, y_align: Clutter.ActorAlign.CENTER});
@@ -116,12 +169,20 @@ class Island extends St.BoxLayout {
         this.connect('notify::height', () => this._reposition());
         this.connect('destroy', () => this._onDestroy());
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
-        settings.connectObject('changed::position', () => this._place(), 'changed', () => this._reposition(), this);
+        settings.connectObject(
+            'changed::position', () => this._place(),
+            'changed::eq-style', () => this._setEqStyle(),
+            'changed::accent-color', () => {
+                this._accent = accentGradient(settings.get_string('accent-color'));
+                this._eq.queue_repaint();
+            },
+            'changed', () => this._reposition(), this);
         this._eqId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 260, () => this._tickEq());
     }
 
     _onDestroy() {
         GLib.source_remove(this._eqId);
+        this._eqTimeline.stop();
         if (this._toastId)
             GLib.source_remove(this._toastId);
         if (this._hoverId)
@@ -131,6 +192,20 @@ class Island extends St.BoxLayout {
         Main.layoutManager.disconnectObject(this);
         this._settings.disconnectObject(this);
         this._slot?.destroy();
+        Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
+    }
+
+    _isNotch() {
+        return !!this._slot && this._position === 'panel-notch' && !!Main.panel.statusArea.dateMenu;
+    }
+
+    _expandedGeometry() {
+        // In notch mode the clock sits in the top of the expanded island
+        if (!this._isNotch())
+            return EXPANDED;
+        const padding = [...EXPANDED.padding];
+        padding[0] += Main.panel.height;
+        return {...EXPANDED, padding};
     }
 
     _compact() {
@@ -143,6 +218,7 @@ class Island extends St.BoxLayout {
         if (position === this._position)
             return;
         this._position = position;
+        Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
         if (this._slot) {
             this._slot.remove_child(this);
             this._slot.destroy();
@@ -158,14 +234,29 @@ class Island extends St.BoxLayout {
             this._slot.connect('notify::width', () => this._reposition());
             Main.panel[target[0]].insert_child_at_index(this._slot, target[1]);
             this._slot.add_child(this);
+            if (this._isNotch()) {
+                const clock = Main.panel.statusArea.dateMenu.container;
+                const sync = () => {
+                    this._notch.width = clock.width;
+                    this._reposition();
+                };
+                clock.connectObject('notify::width', sync, 'notify::x', sync, this);
+                sync();
+            }
         } else {
             Main.layoutManager.addTopChrome(this);
+        }
+        // Reparenting cuts the show animation short, which would leave a shown island invisible
+        if (this._shown) {
+            this.remove_all_transitions();
+            this.set({opacity: 255, scale_x: 1, scale_y: 1});
         }
         this._refresh();
     }
 
     _fitSlot() {
-        if (this._slot && this._layout !== EXPANDED)
+        // The notch island sits behind the clock, so it takes no room in the top bar
+        if (this._slot && !this._layout.expanded && !this._isNotch())
             this._slot.ease({width: this._shown ? this._restWidth : 0, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
     }
 
@@ -176,18 +267,21 @@ class Island extends St.BoxLayout {
         return Clutter.EVENT_STOP;
     }
 
-    _button(iconName, callback) {
-        const button = new St.Button({style_class: 'di-btn', child: new St.Icon({icon_name: iconName})});
+    _button(name, callback) {
+        const button = new St.Button({style_class: 'di-btn', child: new St.Icon({gicon: icon(name)})});
         button.connect('clicked', callback);
         return button;
     }
 
-    setPlayer(player) {
+    // source is the app playing: {name, icon}
+    setPlayer(player, source) {
         this._player = player;
         this._hasMusic = !!player && !!player.trackTitle && player.status !== 'Stopped';
         if (this._hasMusic) {
-            this._playButton.child.icon_name = player.status === 'Playing'
-                ? 'media-playback-pause-symbolic' : 'media-playback-start-symbolic';
+            this._playButton.child.gicon = icon(player.status === 'Playing' ? 'pause' : 'play');
+            this._sourceIcon.gicon = toGicon(source.icon);
+            this._sourceLabel.text = source.name;
+            this._source.visible = this._expanded && !!source.name;
             const key = `${player.trackTitle}\n${player.trackArtists.join(', ')}\n${player.trackCoverUrl}`;
             if (key !== this._trackKey) {
                 this._trackKey = key;
@@ -267,9 +361,12 @@ class Island extends St.BoxLayout {
         this._morph(() => {
             const music = this._hasMusic && !this._toastActive;
             const expanded = music && this._expanded;
+            const notch = this._isNotch() && !expanded;
             this._art.visible = music;
-            this._text.visible = music;
+            this._text.visible = music && !notch;
+            this._notch.visible = notch;
             this._artist.visible = expanded;
+            this._source.visible = expanded && !!this._sourceLabel.text;
             this._controls.visible = expanded;
             this._eq.visible = music && !expanded;
             this._indicatorBox.visible = !this._toastActive && hasIndicators;
@@ -318,7 +415,7 @@ class Island extends St.BoxLayout {
         if (!this._hasMusic || this._toastActive)
             return;
         // Newly revealed content fades in once the island has started growing
-        for (const actor of expanded ? [this._artist, this._controls] : [this._eq]) {
+        for (const actor of expanded ? [this._source, this._artist, this._controls] : [this._eq]) {
             actor.opacity = 0;
             actor.ease({opacity: 255, duration: 250, delay: 120, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         }
@@ -335,11 +432,11 @@ class Island extends St.BoxLayout {
 
         this.set_size(-1, -1);
         change();
-        this._layout = this._expanded && this._hasMusic && !this._toastActive ? EXPANDED : this._compact();
+        this._layout = this._expanded && this._hasMusic && !this._toastActive ? this._expandedGeometry() : this._compact();
         const to = this._layout;
         this._applyGeometry(to);
         const [, toWidth] = this.get_preferred_width(-1);
-        if (to !== EXPANDED)
+        if (!to.expanded)
             this._restWidth = toWidth;
         if (!this._shown || !fromWidth)
             return;
@@ -451,21 +548,121 @@ class Island extends St.BoxLayout {
         this._applyGeometry(this._geometry);
     }
 
+    _eqWidth() {
+        return EQ_WIDTH[this._settings.get_string('eq-style')] ?? EQ_WIDTH.bars;
+    }
+
+    _setEqStyle() {
+        this._eq.width = this._eqWidth();
+        this._refresh();
+    }
+
     _tickEq() {
-        if (!this.visible || !this._eq.visible)
-            return GLib.SOURCE_CONTINUE;
         const playing = this._player?.status === 'Playing';
-        for (const bar of this._eq.get_children()) {
-            bar.ease({
-                height: playing ? 4 + Math.round(Math.random() * 14) : 3,
-                duration: 240,
-                mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
-            });
-        }
+        this._targets = this._targets.map(() => playing ? 0.15 + Math.random() * 0.85 : 0);
         return GLib.SOURCE_CONTINUE;
     }
 
+    // Eases levels toward their targets each frame; skips repaints once a paused visualizer has settled
+    _stepEq(dt) {
+        if (!this._eq.visible)
+            return;
+        const playing = this._player?.status === 'Playing';
+        const ease = 1 - Math.exp(-dt * 10);
+        let moving = playing;
+        this._levels = this._levels.map((level, i) => {
+            const next = level + (this._targets[i] - level) * ease;
+            moving ||= Math.abs(next - level) > 0.001;
+            return next;
+        });
+        if (playing)
+            this._phase += dt * 5;
+        if (moving)
+            this._eq.queue_repaint();
+    }
+
+    // Level at x (0..1) between the sample points, cosine-smoothed
+    _levelAt(x) {
+        const t = x * (EQ_LEVELS - 1), i = Math.min(Math.floor(t), EQ_LEVELS - 2);
+        const f = (1 - Math.cos((t - i) * Math.PI)) / 2;
+        return lerp(this._levels[i], this._levels[i + 1], f);
+    }
+
+    _drawEq(area) {
+        const cr = area.get_context();
+        const [w, h] = area.get_surface_size();
+        const [top, bottom] = this._accent;
+        const gradient = new Cairo.LinearGradient(0, 0, 0, h);
+        gradient.addColorStopRGB(0, ...top);
+        gradient.addColorStopRGB(1, ...bottom);
+        cr.setSource(gradient);
+        const levels = this._levels;
+        const taper = x => Math.sin(Math.PI * x);
+
+        switch (this._settings.get_string('eq-style')) {
+        case 'spectrum':
+            // Thin bars from the bottom, bass side a bit taller
+            levels.forEach((level, i) => {
+                const bh = 2 + level * (h - 2) * (1 - i * 0.06);
+                roundedRect(cr, i * 4, h - bh, 2, bh);
+            });
+            cr.fill();
+            break;
+        case 'segments':
+            // LED meter: 4 columns of up to 5 blocks
+            for (let i = 0; i < 4; i++) {
+                const lit = Math.max(1, Math.ceil(levels[i * 2] * 5));
+                for (let j = 0; j < lit; j++)
+                    roundedRect(cr, i * 6.33, h - j * 3.6 - 2.8, 4, 2.8);
+            }
+            cr.fill();
+            break;
+        case 'solid':
+            cr.moveTo(0, h);
+            for (let x = 0; x <= w; x++)
+                cr.lineTo(x, h - 1 - this._levelAt(x / w) * (h - 1) * Math.sqrt(taper(x / w)));
+            cr.lineTo(w, h);
+            cr.fill();
+            break;
+        case 'wave': {
+            const amp = levels.reduce((a, b) => a + b) / EQ_LEVELS * (h / 2 - 1.5);
+            cr.setLineWidth(2);
+            cr.setLineCap(Cairo.LineCap.ROUND);
+            for (let x = 1; x < w; x++)
+                cr.lineTo(x, h / 2 + amp * Math.sin(x / w * 3 * Math.PI + this._phase) * taper(x / w));
+            cr.stroke();
+            break;
+        }
+        case 'ribbon': {
+            // Band mirrored around the middle, rippling as it plays
+            const half = x => (0.75 + this._levelAt(x) * (h / 2 - 1)) * taper(x) *
+                (0.75 + 0.25 * Math.sin(x * 2 * Math.PI + this._phase));
+            for (let x = 0; x <= w; x++)
+                cr.lineTo(x, h / 2 - half(x / w));
+            for (let x = w; x >= 0; x--)
+                cr.lineTo(x, h / 2 + half(x / w));
+            cr.fill();
+            break;
+        }
+        default:
+            for (let i = 0; i < 4; i++) {
+                const bh = 3 + levels[i * 2] * (h - 3);
+                roundedRect(cr, i * 6, (h - bh) / 2, 3, bh);
+            }
+            cr.fill();
+        }
+        cr.$dispose();
+    }
+
     _reposition() {
+        if (this._isNotch()) {
+            // Line the gap (or the whole expanded island) up with the clock
+            const clock = Main.panel.statusArea.dateMenu.container;
+            const anchor = this._notch.visible ? this._notch.x + this._notch.width / 2 : this.width / 2;
+            this.set_position(Math.round(clock.x + clock.width / 2 - this._slot.x - anchor),
+                Math.max(0, Math.round((Main.panel.height - this.height) / 2)));
+            return;
+        }
         if (this._slot) {
             const grow = PANEL_SLOTS[this._position][2];
             this.set_position(Math.round((this._slot.width - this.width) * grow),

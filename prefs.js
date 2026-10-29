@@ -1,4 +1,5 @@
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -8,6 +9,12 @@ const POSITIONS = [
     ['bottom-center', 'Bottom center'], ['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right'],
     ['panel-left', 'Top bar, left (after Activities)'], ['panel-center-left', 'Top bar, left of clock'],
     ['panel-center-right', 'Top bar, right of clock'], ['panel-right', 'Top bar, right (before system menu)'],
+    ['panel-notch', 'Top bar, around the clock (like the iPhone notch)'],
+];
+
+const SHAPES = [
+    ['bars', 'Bars'], ['spectrum', 'Spectrum'], ['segments', 'Segments'],
+    ['solid', 'Solid'], ['wave', 'Wave'], ['ribbon', 'Ribbon'],
 ];
 
 const FEATURES = [
@@ -41,6 +48,44 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         group.add(position);
         group.add(margin);
         page.add(group);
+
+        const visualizer = new Adw.PreferencesGroup({title: 'Music visualizer'});
+        const shape = new Adw.ComboRow({
+            title: 'Shape',
+            model: Gtk.StringList.new(SHAPES.map(p => p[1])),
+            selected: Math.max(0, SHAPES.findIndex(p => p[0] === settings.get_string('eq-style'))),
+        });
+        shape.connect('notify::selected', () => settings.set_string('eq-style', SHAPES[shape.selected][0]));
+        visualizer.add(shape);
+
+        const rgba = new Gdk.RGBA();
+        rgba.parse(settings.get_string('accent-color'));
+        const colorButton = new Gtk.ColorDialogButton({
+            dialog: new Gtk.ColorDialog({with_alpha: false}),
+            rgba,
+            valign: Gtk.Align.CENTER,
+        });
+        colorButton.connect('notify::rgba', () => {
+            const {red, green, blue} = colorButton.rgba;
+            settings.set_string('accent-color', `#${[red, green, blue].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('')}`);
+        });
+        settings.connect('changed::accent-color', () => {
+            const color = new Gdk.RGBA();
+            color.parse(settings.get_string('accent-color'));
+            colorButton.rgba = color;
+        });
+        const reset = new Gtk.Button({
+            icon_name: 'edit-undo-symbolic',
+            tooltip_text: 'Back to orange',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+        });
+        reset.connect('clicked', () => settings.reset('accent-color'));
+        const color = new Adw.ActionRow({title: 'Color'});
+        color.add_suffix(reset);
+        color.add_suffix(colorButton);
+        visualizer.add(color);
+        page.add(visualizer);
 
         const features = new Adw.PreferencesGroup({title: 'Show in island'});
         for (const [key, title] of FEATURES) {
