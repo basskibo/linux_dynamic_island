@@ -1,5 +1,7 @@
 # Dynamic Island for GNOME
 
+<img src="icon.png" width="96" alt="">
+
 <img width="500" height="269" alt="image" src="https://github.com/user-attachments/assets/39bb63b9-f8fb-444c-bd9d-0f3f877631af" />
 <img width="500" height="269" alt="image" src="https://github.com/user-attachments/assets/10144d60-060b-4ad1-964d-82738655068a" />
 <img width="500" height="269" alt="image" src="https://github.com/user-attachments/assets/9b18daea-04c7-4418-a638-b9b4c3043667" />
