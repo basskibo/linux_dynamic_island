@@ -173,6 +173,7 @@ class Island extends St.BoxLayout {
             'changed::position', () => this._place(),
             'changed::eq-style', () => this._setEqStyle(),
             'changed::width', () => this._refresh(),
+            'changed::text-width', () => this._refresh(),
             'changed::accent-color', () => {
                 this._accent = accentGradient(settings.get_string('accent-color'));
                 this._eq.queue_repaint();
@@ -498,6 +499,7 @@ class Island extends St.BoxLayout {
         const bottom = px(geometry.radius);
         // 0 width setting = size to content; music layouts only, toasts keep their own size
         const minWidth = this._hasMusic && !this._toastActive ? this._settings.get_int('width') : 0;
+        this._text.style = `max-width: ${this._settings.get_int('text-width')}px;`;
         this.style = `border-radius: ${top} ${top} ${bottom} ${bottom}; padding: ${geometry.padding.map(px).join(' ')};` +
             (minWidth ? ` min-width: ${minWidth}px;` : '');
         const artSize = Math.round(geometry.artSize);

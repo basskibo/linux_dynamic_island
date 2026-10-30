@@ -54,6 +54,13 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         });
         settings.bind('width', width, 'value', Gio.SettingsBindFlags.DEFAULT);
 
+        const textWidth = new Adw.SpinRow({
+            title: 'Max text width',
+            subtitle: 'Longer titles are cut with an ellipsis, lower makes the island narrower',
+            adjustment: new Gtk.Adjustment({lower: 40, upper: 600, step_increment: 10, page_increment: 50}),
+        });
+        settings.bind('text-width', textWidth, 'value', Gio.SettingsBindFlags.DEFAULT);
+
         group.add(position);
         group.add(margin);
         const expandOn = new Adw.ComboRow({
@@ -65,6 +72,7 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         expandOn.connect('notify::selected', () => settings.set_string('expand-on', EXPAND_ON[expandOn.selected][0]));
 
         group.add(width);
+        group.add(textWidth);
         group.add(expandOn);
         page.add(group);
 
