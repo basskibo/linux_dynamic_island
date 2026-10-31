@@ -17,6 +17,10 @@ const SHAPES = [
     ['solid', 'Solid'], ['wave', 'Wave'], ['ribbon', 'Ribbon'],
 ];
 
+const ART_SHAPES = [['auto', 'Auto (round, rounded when expanded)'], ['circle', 'Circle'], ['rounded', 'Rounded square'], ['square', 'Square']];
+
+const ART_BORDERS = [['none', 'None'], ['subtle', 'Subtle'], ['white', 'White'], ['accent', 'Visualizer color']];
+
 const EXPAND_ON = [['hover', 'Hover'], ['click', 'Click'], ['both', 'Hover or click']];
 
 const FEATURES = [
@@ -49,8 +53,8 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
 
         const width = new Adw.SpinRow({
             title: 'Width',
-            subtitle: 'Minimum width in pixels, 0 fits the content',
-            adjustment: new Gtk.Adjustment({lower: 0, upper: 800, step_increment: 10, page_increment: 50}),
+            subtitle: 'Minimum width in pixels, 0 fits the content, below 0 makes the resting island tighter',
+            adjustment: new Gtk.Adjustment({lower: -10, upper: 800, step_increment: 1, page_increment: 10}),
         });
         settings.bind('width', width, 'value', Gio.SettingsBindFlags.DEFAULT);
 
@@ -75,6 +79,31 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         group.add(textWidth);
         group.add(expandOn);
         page.add(group);
+
+        const cover = new Adw.PreferencesGroup({title: 'Cover art'});
+        const artSize = new Adw.SpinRow({
+            title: 'Size',
+            subtitle: 'Resting island, in pixels. Above 32 the island gets taller than the top bar',
+            adjustment: new Gtk.Adjustment({lower: 16, upper: 40, step_increment: 1, page_increment: 4}),
+        });
+        settings.bind('art-size', artSize, 'value', Gio.SettingsBindFlags.DEFAULT);
+        cover.add(artSize);
+        const artSizeExpanded = new Adw.SpinRow({
+            title: 'Expanded size',
+            subtitle: 'Details view, in pixels',
+            adjustment: new Gtk.Adjustment({lower: 32, upper: 120, step_increment: 2, page_increment: 8}),
+        });
+        settings.bind('art-size-expanded', artSizeExpanded, 'value', Gio.SettingsBindFlags.DEFAULT);
+        cover.add(artSizeExpanded);
+        cover.add(this._choiceRow(settings, 'art-shape', 'Shape', ART_SHAPES));
+        cover.add(this._choiceRow(settings, 'art-border', 'Frame', ART_BORDERS));
+        const artCompact = new Adw.SwitchRow({title: 'Show when resting', subtitle: 'Turn off for a narrower island'});
+        settings.bind('art-compact', artCompact, 'active', Gio.SettingsBindFlags.DEFAULT);
+        cover.add(artCompact);
+        const artSpin = new Adw.SwitchRow({title: 'Spin like a vinyl', subtitle: 'Turns while playing, looks best with the circle shape'});
+        settings.bind('art-spin', artSpin, 'active', Gio.SettingsBindFlags.DEFAULT);
+        cover.add(artSpin);
+        page.add(cover);
 
         const visualizer = new Adw.PreferencesGroup({title: 'Music visualizer'});
         const shape = new Adw.ComboRow({
@@ -122,5 +151,15 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         }
         page.add(features);
         window.add(page);
+    }
+
+    _choiceRow(settings, key, title, choices) {
+        const row = new Adw.ComboRow({
+            title,
+            model: Gtk.StringList.new(choices.map(p => p[1])),
+            selected: Math.max(0, choices.findIndex(p => p[0] === settings.get_string(key))),
+        });
+        row.connect('notify::selected', () => settings.set_string(key, choices[row.selected][0]));
+        return row;
     }
 }

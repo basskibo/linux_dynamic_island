@@ -18,9 +18,41 @@
       <summary>Distance from the screen edge (px)</summary>
     </key>
     <key name="width" type="i">
-      <range min="0" max="800"/>
+      <range min="-10" max="800"/>
       <default>0</default>
-      <summary>Minimum island width (px), 0 sizes it to the content</summary>
+      <summary>Minimum island width (px), 0 sizes it to the content, below 0 tightens the resting island</summary>
+    </key>
+    <key name="art-size" type="i">
+      <range min="16" max="40"/>
+      <default>26</default>
+      <summary>Cover art size in the resting island (px)</summary>
+    </key>
+    <key name="art-size-expanded" type="i">
+      <range min="32" max="120"/>
+      <default>56</default>
+      <summary>Cover art size in the expanded island (px)</summary>
+    </key>
+    <key name="art-shape" type="s">
+      <choices>
+        <choice value="auto"/><choice value="circle"/><choice value="rounded"/><choice value="square"/>
+      </choices>
+      <default>'auto'</default>
+      <summary>Cover art shape, auto is round when resting and rounded square when expanded</summary>
+    </key>
+    <key name="art-border" type="s">
+      <choices>
+        <choice value="none"/><choice value="subtle"/><choice value="white"/><choice value="accent"/>
+      </choices>
+      <default>'none'</default>
+      <summary>Frame around the cover art</summary>
+    </key>
+    <key name="art-compact" type="b">
+      <default>true</default>
+      <summary>Show the cover art in the resting island</summary>
+    </key>
+    <key name="art-spin" type="b">
+      <default>false</default>
+      <summary>Spin the cover like a vinyl record while playing</summary>
     </key>
     <key name="text-width" type="i">
       <range min="40" max="600"/>

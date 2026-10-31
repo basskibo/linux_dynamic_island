@@ -8,15 +8,44 @@ import Pango from 'gi://Pango';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const ART_SMALL = 26;
-const ART_BIG = 56;
 const BAR_W = 170;
+const SPACING = 12;
 
-// padding is [top, right, bottom, left]
-const COMPACT = {radius: 18, padding: [5, 14, 5, 5], artSize: ART_SMALL, artRadius: ART_SMALL / 2};
-const EXPANDED = {radius: 30, padding: [12, 16, 12, 12], artSize: ART_BIG, artRadius: 14, expanded: true};
-// Slimmer resting island so it fits inside the top bar
-const PANEL_COMPACT = {...COMPACT, padding: [3, 12, 3, 3]};
+const ART_RADIUS = {
+    circle: size => size / 2,
+    rounded: size => size / 4,
+    square: () => 0,
+};
+
+// Resting and expanded layouts from the settings. padding is [top, right, bottom, left].
+// A negative width tightens the resting island (less padding and spacing), handy around the clock.
+function buildLayouts(settings) {
+    const tighten = Math.max(0, -settings.get_int('width'));
+    const shape = settings.get_string('art-shape');
+    const radius = (size, auto) => (ART_RADIUS[shape] ?? auto)(size);
+    const small = settings.get_int('art-size');
+    const big = settings.get_int('art-size-expanded');
+    const panelPad = Math.max(0, 3 - (small - 26) / 2);
+    const compact = {
+        radius: small / 2 + 5,
+        padding: [5, Math.max(0, 14 - tighten), 5, 5],
+        spacing: Math.max(0, SPACING - tighten),
+        artSize: small,
+        artRadius: radius(small, ART_RADIUS.circle),
+    };
+    return {
+        compact,
+        // Slimmer resting island so it fits inside the top bar, a bigger cover eats into the padding first
+        panelCompact: {...compact, padding: [panelPad, Math.max(0, 12 - tighten), panelPad, 3]},
+        expanded: {radius: 30, padding: [12, 16, 12, 12], spacing: SPACING, artSize: big, artRadius: radius(big, ART_RADIUS.rounded), expanded: true},
+    };
+}
+
+const ART_BORDER = {
+    subtle: () => '1px solid rgba(255,255,255,0.3)',
+    white: () => '2px solid #fff',
+    accent: settings => `2px solid ${settings.get_string('accent-color')}`,
+};
 
 // Top bar positions: [panel box, index in box, which way the expanded island grows (0 right, 1 left)].
 // 'panel-notch' wraps around the clock like the iPhone island around the camera.
@@ -90,8 +119,9 @@ class Island extends St.BoxLayout {
         this._toastId = 0;
         this._hoverId = 0;
         this._timeline = null;
-        this._layout = COMPACT;
-        this._geometry = COMPACT;
+        this._layouts = buildLayouts(settings);
+        this._layout = this._layouts.compact;
+        this._geometry = this._layout;
         this._slot = null;
         this._position = null;
         this._restWidth = 0;
@@ -172,11 +202,18 @@ class Island extends St.BoxLayout {
         settings.connectObject(
             'changed::position', () => this._place(),
             'changed::eq-style', () => this._setEqStyle(),
-            'changed::width', () => this._refresh(),
+            'changed::width', () => this._updateLayouts(),
+            'changed::art-size', () => this._updateLayouts(),
+            'changed::art-size-expanded', () => this._updateLayouts(),
+            'changed::art-shape', () => this._updateLayouts(),
+            'changed::art-border', () => this._applyGeometry(this._geometry),
+            'changed::art-compact', () => this._refresh(),
+            'changed::art-spin', () => this._syncSpin(),
             'changed::text-width', () => this._refresh(),
             'changed::accent-color', () => {
                 this._accent = accentGradient(settings.get_string('accent-color'));
                 this._eq.queue_repaint();
+                this._applyGeometry(this._geometry);
             },
             'changed', () => this._reposition(), this);
         this._eqId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 260, () => this._tickEq());
@@ -193,10 +230,17 @@ class Island extends St.BoxLayout {
         this._artCancellable.cancel();
         Main.layoutManager.disconnectObject(this);
         this._settings.disconnectObject(this);
-        this._slot?.destroy();
         Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.menu.disconnectObject(this);
+    }
+
+    // The slot is our parent: destroying it from the destroy handler makes Clutter destroy us twice and abort the shell
+    destroy() {
+        const slot = this._slot;
+        this._slot = null;
+        super.destroy();
+        slot?.destroy();
     }
 
     _isNotch() {
@@ -204,17 +248,48 @@ class Island extends St.BoxLayout {
     }
 
     _expandedGeometry() {
+        const expanded = this._layouts.expanded;
         // In notch mode the clock sits in the top of the expanded island
         if (!this._isNotch())
-            return EXPANDED;
-        const padding = [...EXPANDED.padding];
+            return expanded;
+        const padding = [...expanded.padding];
         padding[0] += Main.panel.height;
         // Hangs from the top edge like the macOS notch: square top, round bottom
-        return {...EXPANDED, padding, topRadius: 0};
+        return {...expanded, padding, topRadius: 0};
     }
 
     _compact() {
-        return this._slot ? PANEL_COMPACT : COMPACT;
+        return this._slot ? this._layouts.panelCompact : this._layouts.compact;
+    }
+
+    _updateLayouts() {
+        this._layouts = buildLayouts(this._settings);
+        this._refresh();
+    }
+
+    // Vinyl mode: the cover turns while playing and stops where it is when paused
+    _syncSpin() {
+        const enabled = this._settings.get_boolean('art-spin');
+        const spin = enabled && this._hasMusic && this._player?.status === 'Playing';
+        if (spin === !!this._art.get_transition('di-spin'))
+            return;
+        if (spin) {
+            // Plain transition, not ease(): ease() keeps the shell in "busy" mode for as long as it runs
+            const angle = this._art.rotation_angle_z % 360;
+            const transition = new Clutter.PropertyTransition({
+                property_name: 'rotation-angle-z',
+                duration: 8000,
+                repeat_count: -1,
+                progress_mode: Clutter.AnimationMode.LINEAR,
+            });
+            transition.set_from(angle);
+            transition.set_to(angle + 360);
+            this._art.add_transition('di-spin', transition);
+        } else {
+            this._art.remove_transition('di-spin');
+            if (!enabled)
+                this._art.rotation_angle_z = 0;
+        }
     }
 
     // Puts the island in a top bar slot, or floating as top chrome for the screen positions
@@ -304,6 +379,7 @@ class Island extends St.BoxLayout {
             }
         }
         this._refresh();
+        this._syncSpin();
         this._tickEq();
     }
 
@@ -377,7 +453,7 @@ class Island extends St.BoxLayout {
             const music = this._hasMusic && !this._toastActive;
             const expanded = music && this._expanded;
             const notch = this._isNotch() && !expanded;
-            this._art.visible = music;
+            this._art.visible = music && (expanded || this._settings.get_boolean('art-compact'));
             this._text.visible = music && !notch;
             this._notch.visible = notch;
             this._artist.visible = expanded;
@@ -477,6 +553,7 @@ class Island extends St.BoxLayout {
                 radius: lerp(from.radius, to.radius, p),
                 topRadius: lerp(from.topRadius ?? from.radius, to.topRadius ?? to.radius, p),
                 padding: from.padding.map((v, i) => lerp(v, to.padding[i], p)),
+                spacing: lerp(from.spacing, to.spacing, p),
                 artSize: lerp(from.artSize, to.artSize, p),
                 artRadius: lerp(from.artRadius, to.artRadius, p),
             }, lerp(fromWidth, toWidth, p), lerp(fromHeight, toHeight, p));
@@ -497,14 +574,15 @@ class Island extends St.BoxLayout {
         const px = v => `${Math.max(0, Math.round(v))}px`;
         const top = px(geometry.topRadius ?? geometry.radius);
         const bottom = px(geometry.radius);
-        // 0 width setting = size to content; music layouts only, toasts keep their own size
+        // Width 0 = size to content, below 0 is handled by the layouts; music layouts only, toasts keep their own size
         const minWidth = this._hasMusic && !this._toastActive ? this._settings.get_int('width') : 0;
         this._text.style = `max-width: ${this._settings.get_int('text-width')}px;`;
         this.style = `border-radius: ${top} ${top} ${bottom} ${bottom}; padding: ${geometry.padding.map(px).join(' ')};` +
-            (minWidth ? ` min-width: ${minWidth}px;` : '');
+            ` spacing: ${px(geometry.spacing)};` + (minWidth > 0 ? ` min-width: ${minWidth}px;` : '');
         const artSize = Math.round(geometry.artSize);
         this._art.set_size(artSize, artSize);
-        this._art.style = `${this._artBackground} border-radius: ${px(geometry.artRadius)};`;
+        const border = ART_BORDER[this._settings.get_string('art-border')]?.(this._settings);
+        this._art.style = `${this._artBackground} border-radius: ${px(geometry.artRadius)};` + (border ? ` border: ${border};` : '');
         if (width !== undefined)
             this.set_size(Math.round(width), Math.round(height));
     }
