@@ -9,6 +9,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const BAR_W = 170;
+const ART_MAX_BYTES = 10 * 1024 * 1024;
 const SPACING = 12;
 
 const ART_RADIUS = {
@@ -161,7 +162,13 @@ class Island extends St.BoxLayout {
         this.add_child(this._eq);
         this._eqTimeline = new Clutter.Timeline({actor: this._eq, duration: 1000, repeat_count: -1});
         this._eqTimeline.connect('new-frame', () => this._stepEq(this._eqTimeline.get_delta() / 1000));
-        this._eqTimeline.start();
+        // Only runs while on screen, a running timeline keeps the frame clock ticking
+        this._eq.connect('notify::mapped', () => {
+            if (this._eq.mapped)
+                this._eqTimeline.start();
+            else
+                this._eqTimeline.stop();
+        });
 
         this._controls = new St.BoxLayout({visible: false, y_align: Clutter.ActorAlign.CENTER});
         this._controls.add_child(this._button('previous', () => this._player?.previous()));
@@ -199,6 +206,7 @@ class Island extends St.BoxLayout {
         this.connect('notify::height', () => this._reposition());
         this.connect('destroy', () => this._onDestroy());
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
+        global.display.connectObject('in-fullscreen-changed', () => this._refresh(), this);
         settings.connectObject(
             'changed::position', () => this._place(),
             'changed::eq-style', () => this._setEqStyle(),
@@ -229,6 +237,7 @@ class Island extends St.BoxLayout {
         this._timeline?.stop();
         this._artCancellable.cancel();
         Main.layoutManager.disconnectObject(this);
+        global.display.disconnectObject(this);
         this._settings.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.disconnectObject(this);
@@ -256,6 +265,11 @@ class Island extends St.BoxLayout {
         padding[0] += Main.panel.height;
         // Hangs from the top edge like the macOS notch: square top, round bottom
         return {...expanded, padding, topRadius: 0};
+    }
+
+    // In the top bar the island goes away with the panel, so toasts wouldn't be seen
+    get hiddenByFullscreen() {
+        return !!this._slot && !!Main.layoutManager.primaryMonitor?.inFullscreen;
     }
 
     _compact() {
@@ -335,6 +349,10 @@ class Island extends St.BoxLayout {
         if (this._shown) {
             this.remove_all_transitions();
             this.set({opacity: 255, scale_x: 1, scale_y: 1});
+        } else {
+            // Same for the hide animation: without its onComplete the island would stay around, empty and clickable
+            this.remove_all_transitions();
+            this.hide();
         }
         this._refresh();
     }
@@ -463,7 +481,10 @@ class Island extends St.BoxLayout {
             this._indicatorBox.visible = !this._toastActive && hasIndicators;
             this._toastBox.visible = this._toastActive;
         });
-        this._setShown(this._hasMusic || hasIndicators || this._toastActive);
+        // Floating island steps aside for fullscreen video (in the top bar it hides with the panel); toasts still
+        // show because they replace the shell's OSD. Not trackFullscreen: it would force a hidden island visible.
+        const fullscreen = !this._slot && Main.layoutManager.primaryMonitor?.inFullscreen;
+        this._setShown(this._toastActive || (!fullscreen && (this._hasMusic || hasIndicators)));
         this._fitSlot();
     }
 
@@ -627,8 +648,15 @@ class Island extends St.BoxLayout {
     }
 
     _setArt(url) {
+        // Whatever is still running for the previous track must not overwrite this one's cover
+        this._artCancellable.cancel();
+        const cancellable = this._artCancellable = new Gio.Cancellable();
+        if (url.startsWith('file://')) {
+            this._setArtFile(Gio.File.new_for_uri(url), cancellable);
+            return;
+        }
         if (!url.startsWith('http')) {
-            this._setArtBackground(url.startsWith('file://') ? url : null);
+            this._setArtBackground(null);
             return;
         }
         // St can't load remote images, so https covers (Spotify) are downloaded to a cache first
@@ -636,19 +664,44 @@ class Island extends St.BoxLayout {
         GLib.mkdir_with_parents(dir, 0o755);
         const dest = Gio.File.new_for_path(`${dir}/${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, url, -1)}`);
         if (dest.query_exists(null)) {
-            this._setArtBackground(dest.get_uri());
+            this._setArtFile(dest, cancellable);
             return;
         }
-        Gio.File.new_for_uri(url).copy_async(dest, Gio.FileCopyFlags.OVERWRITE, GLib.PRIORITY_DEFAULT,
-            this._artCancellable, null, (file, res) => {
+        // Through a temp name so an interrupted download never passes for a cached cover
+        const part = Gio.File.new_for_path(`${dest.get_path()}.part`);
+        // shortcut: size is only checked after the download, cancel from a progress callback if huge covers show up
+        Gio.File.new_for_uri(url).copy_async(part, Gio.FileCopyFlags.OVERWRITE, GLib.PRIORITY_DEFAULT,
+            cancellable, null, (file, res) => {
                 try {
                     file.copy_finish(res);
+                    part.move(dest, Gio.FileCopyFlags.OVERWRITE, null, null);
                 } catch (e) {
                     if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                         console.warn(`dynamic-island: cover download failed: ${e.message}`);
                     return;
                 }
-                this._setArtBackground(dest.get_uri());
+                if (!cancellable.is_cancelled())
+                    this._setArtFile(dest, cancellable);
+            });
+    }
+
+    // St loads background images synchronously in the compositor and the path comes from another app:
+    // /dev/zero, a FIFO or a huge file would freeze the whole session, so only small regular files get through.
+    // get_uri() also percent-encodes the quotes that could break out of the url("...") in the style.
+    _setArtFile(file, cancellable) {
+        file.query_info_async('standard::type,standard::size', Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_DEFAULT,
+            cancellable, (f, res) => {
+                let uri = null;
+                try {
+                    const info = f.query_info_finish(res);
+                    if (info.get_file_type() === Gio.FileType.REGULAR && info.get_size() <= ART_MAX_BYTES)
+                        uri = f.get_uri();
+                } catch (e) {
+                    if (e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        return;
+                }
+                if (!cancellable.is_cancelled())
+                    this._setArtBackground(uri);
             });
     }
 

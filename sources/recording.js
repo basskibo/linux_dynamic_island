@@ -12,10 +12,14 @@ export class RecordingSource {
         this._settings = settings;
         this._tickId = 0;
         Main.screenshotUI.connectObject('notify::screencast-in-progress', () => this._sync(), this);
+        settings.connectObject('changed::show-recording', () => this._sync(), this);
+        // Enable also runs on unlock, possibly in the middle of a recording
+        this._sync();
     }
 
     destroy() {
         Main.screenshotUI.disconnectObject(this);
+        this._settings.disconnectObject(this);
         this._stopTick();
         this._island = null;
         this._settings = null;

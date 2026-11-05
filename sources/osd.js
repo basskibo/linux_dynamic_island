@@ -29,6 +29,10 @@ export class OsdSource {
         this._originalShow = originalShow;
         osd.show = (...args) => {
             try {
+                if (this._island.hiddenByFullscreen) {
+                    originalShow.apply(osd, args);
+                    return;
+                }
                 const [, icon, label, level] = args;
                 if (typeof icon !== 'string' && !(icon instanceof Gio.Icon))
                     throw new Error(`unexpected icon ${icon}`);

@@ -2,6 +2,8 @@ import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import {MprisPlayer} from 'resource:///org/gnome/shell/ui/mpris.js';
 
+import {pickPlayer} from './pick.js';
+
 const MPRIS_PREFIX = 'org.mpris.MediaPlayer2.';
 
 const findApp = name => {
@@ -45,14 +47,20 @@ export class MediaSource {
 
     destroy() {
         Gio.DBus.session.signal_unsubscribe(this._nameOwnerSub);
-        for (const {player, handlerIds} of this._players.values())
+        for (const {player, handlerIds} of this._players.values()) {
             handlerIds.forEach(id => player.disconnect(id));
+            // MprisPlayer has no destroy and these keep it alive, one more copy per lock screen.
+            // Not via _close(): it nulls the proxies, which throws in a ready callback still pending.
+            player._mprisProxy?.disconnectObject(player);
+            player._playerProxy?.disconnectObject(player);
+        }
         this._players = null;
         this._current = null;
         this._island = null;
     }
 
-    _update() {
+    _update(changed = null) {
+        this._current = pickPlayer([...this._players.values()].map(entry => entry.player), this._current, changed);
         this._island.setPlayer(this._current, this._current && sourceOf(this._current));
     }
 
@@ -62,18 +70,12 @@ export class MediaSource {
             return;
         const player = new MprisPlayer(busName);
         const handlerIds = [
-            player.connect('changed', () => {
-                // A player that starts playing takes over the island
-                if (player.status === 'Playing' || !this._current)
-                    this._current = player;
-                this._update();
-            }),
+            player.connect('changed', () => this._update(player)),
             player.connect('closed', () => {
                 this._players.delete(busName);
-                if (this._current === player) {
-                    const rest = [...this._players.values()].map(entry => entry.player);
-                    this._current = rest.find(p => p.status === 'Playing') ?? rest[0] ?? null;
-                }
+                // Its proxies are gone, reading its status would throw
+                if (this._current === player)
+                    this._current = null;
                 this._update();
             }),
         ];

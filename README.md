@@ -14,7 +14,7 @@ Hover to expand with controls, click to open the player. Position is configurabl
 (after Activities, left/right of the clock, before the system menu, or wrapped around the clock like the
 iPhone notch). The music visualizer shape (bars, spectrum, segments, solid, wave, ribbon) and color are configurable too.
 
-Supports GNOME Shell 46–48.
+Supports GNOME Shell 46.
 
 ## Install on another computer
 

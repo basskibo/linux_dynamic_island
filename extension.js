@@ -14,7 +14,14 @@ export default class DynamicIslandExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._island = new Island(this._settings);
-        this._sources = SOURCES.map(Source => new Source(this._island, this._settings));
+        this._sources = [];
+        try {
+            SOURCES.forEach(Source => this._sources.push(new Source(this._island, this._settings)));
+        } catch (e) {
+            // The shell won't call disable() after a failed enable(), so the OSD patch and island would stay behind
+            this.disable();
+            throw e;
+        }
     }
 
     disable() {
