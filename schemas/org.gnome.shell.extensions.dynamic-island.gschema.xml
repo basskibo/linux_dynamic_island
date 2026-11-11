@@ -66,6 +66,45 @@
       <default>'hover'</default>
       <summary>What opens the details view</summary>
     </key>
+    <key name="auto-hide-enabled" type="b">
+      <default>true</default>
+      <summary>Hide the island after inactivity, pausing while hovered</summary>
+    </key>
+    <key name="auto-hide-delay" type="i">
+      <range min="1" max="300"/>
+      <default>10</default>
+      <summary>Auto-hide countdown in seconds after the pointer leaves</summary>
+    </key>
+    <key name="cover-dot-enabled" type="b">
+      <default>true</default>
+      <summary>Show a cover-art launcher beside the clock after auto-hide</summary>
+    </key>
+    <key name="cover-dot-size" type="i">
+      <range min="12" max="28"/>
+      <default>20</default>
+      <summary>Diameter of the clock-side cover-art launcher in pixels</summary>
+    </key>
+    <key name="dashboard-calendar" type="b">
+      <default>true</default>
+      <summary>Show the date strip in the expanded dashboard</summary>
+    </key>
+    <key name="dashboard-account" type="b">
+      <default>true</default>
+      <summary>Show the account photo and Camera launcher in the dashboard</summary>
+    </key>
+    <key name="dashboard-header" type="b">
+      <default>true</default>
+      <summary>Show the Nook, Tray, and settings header in the dashboard</summary>
+    </key>
+    <key name="animations-enabled" type="b">
+      <default>true</default>
+      <summary>Animate interface opening, closing, resizing, and feedback</summary>
+    </key>
+    <key name="animation-speed" type="i">
+      <range min="25" max="200"/>
+      <default>100</default>
+      <summary>Interface animation speed percentage, higher is faster</summary>
+    </key>
     <key name="eq-style" type="s">
       <choices>
         <choice value="bars"/><choice value="spectrum"/><choice value="segments"/>

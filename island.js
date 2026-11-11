@@ -106,6 +106,7 @@ class Island extends St.Widget {
             pivot_point: new Graphene.Point({x: 0.5, y: 0.5}),
         });
         this._settings = settings;
+        this._animationSettings = St.Settings.get();
         this._player = null;
         this._hasMusic = false;
         this._expanded = false;
@@ -302,6 +303,15 @@ class Island extends St.Widget {
         Main.layoutManager.connectObject('monitors-changed', () => this._reposition(), this);
         settings.connectObject(
             'changed::position', () => this._place(),
+            'changed::auto-hide-enabled', () => this._onAutoHideSettingsChanged(),
+            'changed::auto-hide-delay', () => this._onAutoHideSettingsChanged(),
+            'changed::cover-dot-enabled', () => this._onCoverDotSettingsChanged(),
+            'changed::cover-dot-size', () => this._onCoverDotSettingsChanged(),
+            'changed::dashboard-calendar', () => this._refresh(),
+            'changed::dashboard-account', () => this._refresh(),
+            'changed::dashboard-header', () => this._refresh(),
+            'changed::animations-enabled', () => this._onAnimationSettingsChanged(),
+            'changed::animation-speed', () => this._onAnimationSettingsChanged(),
             'changed::eq-style', () => this._setEqStyle(),
             'changed::width', () => this._updateLayouts(),
             'changed::art-size', () => this._updateLayouts(),
@@ -317,6 +327,7 @@ class Island extends St.Widget {
                 this._applyGeometry(this._geometry);
             },
             'changed', () => this._reposition(), this);
+        this._animationSettings.connectObject('notify::enable-animations', () => this._onAnimationSettingsChanged(), this);
         this._eqId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 260, () => this._tickEq());
     }
 
@@ -340,6 +351,7 @@ class Island extends St.Widget {
         this._artCancellable.cancel();
         Main.layoutManager.disconnectObject(this);
         this._settings.disconnectObject(this);
+        this._animationSettings.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.container.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.disconnectObject(this);
         Main.panel.statusArea.dateMenu?.menu.disconnectObject(this);
@@ -452,8 +464,8 @@ class Island extends St.Widget {
 
     _fitSlot() {
         // The notch island sits behind the clock, so it takes no room in the top bar
-        if (this._slot && !this._layout.expanded && !this._isNotch())
-            this._slot.ease({width: this._shown ? this._restWidth : 0, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        if (this._slot && (!this._layout.expanded || !this._shown) && !this._isNotch())
+            this._ease(this._slot, {width: this._shown ? this._restWidth : 0, duration: 300, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
     }
 
     vfunc_button_release_event(event) {
@@ -541,11 +553,26 @@ class Island extends St.Widget {
         const box = clock?.get_parent() ?? Main.panel._centerBox;
         const index = clock ? box.get_children().indexOf(clock) + 1 : -1;
         box.insert_child_at_index(this._coverDot, index);
+        this._updateCoverDot();
+    }
+
+    _updateCoverDot() {
+        const size = this._settings.get_int('cover-dot-size');
+        this._coverDotArt.set_size(size, size);
+        this._coverDotArt.style = `${this._artBackground} border-radius: ${size / 2}px;`;
+        this._coverDotFallback.icon_size = Math.max(8, size - 7);
+    }
+
+    _onCoverDotSettingsChanged() {
+        this._updateCoverDot();
+        this._syncCoverDot();
     }
 
     _syncCoverDot() {
         if (this._coverDot && !this._destroying)
-            this._coverDot.visible = this._autoHidden && this._hasMusic && !this.visible;
+            this._coverDot.visible = this._settings.get_boolean('cover-dot-enabled') &&
+                this._settings.get_boolean('auto-hide-enabled') &&
+                this._autoHidden && this._hasMusic && !this.visible;
     }
 
     _revealFromCoverDot() {
@@ -579,11 +606,19 @@ class Island extends St.Widget {
             (this._isNotch() && Main.panel.statusArea.dateMenu.hover);
     }
 
+    _onAutoHideSettingsChanged() {
+        this._cancelAutoHide();
+        if (!this._settings.get_boolean('auto-hide-enabled'))
+            this._autoHidden = false;
+        this._refresh();
+        this._scheduleAutoHide();
+    }
+
     _scheduleAutoHide() {
         this._cancelAutoHide();
-        if (this._autoHidden || this._pointerOnIsland())
+        if (!this._settings.get_boolean('auto-hide-enabled') || this._autoHidden || this._pointerOnIsland())
             return;
-        this._autoHideId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
+        this._autoHideId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, this._settings.get_int('auto-hide-delay'), () => {
             this._autoHideId = 0;
             if (!this._pointerOnIsland()) {
                 this._autoHidden = true;
@@ -638,7 +673,8 @@ class Island extends St.Widget {
         this._toastLabel.visible = !!text;
         this._toastBar.visible = level !== null;
         if (level !== null) {
-            this._toastFill.ease({
+            this._toastLevel = level;
+            this._ease(this._toastFill, {
                 width: Math.round(BAR_W * Math.max(0, Math.min(level, 1))),
                 duration: 120,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
@@ -658,7 +694,7 @@ class Island extends St.Widget {
         this._refresh();
         if (!wasActive) {
             this._toastBox.opacity = 0;
-            this._toastBox.ease({opacity: 255, duration: 250, delay: 100, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            this._ease(this._toastBox, {opacity: 255, duration: 250, delay: 100, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         }
     }
 
@@ -710,40 +746,89 @@ class Island extends St.Widget {
             [...this._indicators.values()].map(chip => chip._activityState),
             this._settings.get_boolean('art-compact'),
             this._settings.get_int('text-width'), this._settings.get_string('eq-style'),
+            this._settings.get_boolean('dashboard-calendar'),
+            this._settings.get_boolean('dashboard-account'),
+            this._settings.get_boolean('dashboard-header'),
         ]);
         if (renderKey !== this._renderKey) {
             this._renderKey = renderKey;
             this._morph(() => {
-            const music = this._hasMusic && !this._toastActive;
-            const expanded = music && this._expanded;
-            const notch = this._isNotch() && !expanded;
-            this._art.visible = music && (expanded || this._settings.get_boolean('art-compact'));
-            this._artTile.visible = this._art.visible;
-            this._artBadge.visible = expanded;
-            this._text.visible = music && !notch;
-            this._notch.visible = notch;
-            this._artist.visible = expanded;
-            this._album.visible = expanded && !!this._album.text;
-            this._source.visible = expanded && !!this._sourceLabel.text;
-            this._controls.visible = expanded;
-            this._dashboardHeading.visible = false;
-            this._header.visible = expanded;
-            this._background.visible = expanded;
-            this._avatar.visible = expanded;
-            this._setCachedStyle(this._body, `spacing: ${expanded ? 16 : SPACING}px;`);
-            this._calendar.visible = expanded;
-            if (expanded)
-                this.add_style_class_name('di-dashboard');
-            else
-                this.remove_style_class_name('di-dashboard');
-            this._eq.visible = music && !expanded;
-            this._indicatorBox.visible = !this._toastActive && hasIndicators;
-            this._toastBox.visible = this._toastActive;
+                const music = this._hasMusic && !this._toastActive;
+                const expanded = music && this._expanded;
+                const notch = this._isNotch() && !expanded;
+                this._art.visible = music && (expanded || this._settings.get_boolean('art-compact'));
+                this._artTile.visible = this._art.visible;
+                this._artBadge.visible = expanded;
+                this._text.visible = music && !notch;
+                this._notch.visible = notch;
+                this._artist.visible = expanded;
+                this._album.visible = expanded && !!this._album.text;
+                this._source.visible = expanded && !!this._sourceLabel.text;
+                this._controls.visible = expanded;
+                this._dashboardHeading.visible = false;
+                this._header.visible = expanded && this._settings.get_boolean('dashboard-header');
+                this._background.visible = expanded;
+                this._avatar.visible = expanded && this._settings.get_boolean('dashboard-account');
+                this._setCachedStyle(this._body, `spacing: ${expanded ? 16 : SPACING}px;`);
+                this._calendar.visible = expanded && this._settings.get_boolean('dashboard-calendar');
+                if (expanded)
+                    this.add_style_class_name('di-dashboard');
+                else
+                    this.remove_style_class_name('di-dashboard');
+                this._eq.visible = music && !expanded;
+                this._indicatorBox.visible = !this._toastActive && hasIndicators;
+                this._toastBox.visible = this._toastActive;
             });
         }
         this._setShown(!this._autoHidden && (this._hasMusic || hasIndicators || this._toastActive));
         this._fitSlot();
         this._syncCoverDot();
+    }
+
+    _animationDuration(milliseconds) {
+        if (!this._settings.get_boolean('animations-enabled') || !this._animationSettings.enable_animations)
+            return 0;
+        return milliseconds > 0
+            ? Math.max(1, Math.round(milliseconds * 100 / this._settings.get_int('animation-speed')))
+            : 0;
+    }
+
+    _ease(actor, options) {
+        const {duration = 250, delay = 0, mode, onComplete, ...properties} = options;
+        const milliseconds = this._animationDuration(duration);
+        if (!milliseconds) {
+            for (const property of Object.keys(properties))
+                actor.remove_transition(property.replaceAll('_', '-'));
+            actor.set(properties);
+            onComplete?.();
+            return;
+        }
+        actor.ease({...properties, duration: milliseconds, delay: this._animationDuration(delay), mode, onComplete});
+    }
+
+    _onAnimationSettingsChanged() {
+        // Settle old transitions before switching speed or disabling animation.
+        // Invalidate their completions so a cancelled fade cannot hide the panel.
+        ++this._visibilitySerial;
+        this.remove_all_transitions();
+        this._timeline?.stop();
+        this._timeline = null;
+        for (const actor of [this._artist, this._controls, this._eq, this._toastBox]) {
+            actor.remove_transition('opacity');
+            actor.opacity = 255;
+        }
+        this._slot?.remove_all_transitions();
+        this._toastFill.remove_transition('width');
+        if (Number.isFinite(this._toastLevel))
+            this._toastFill.width = Math.round(BAR_W * Math.max(0, Math.min(this._toastLevel, 1)));
+        this.opacity = this._shown ? 255 : 0;
+        if (!this._shown) {
+            this.hide();
+            this._expanded = false;
+        }
+        this.set_size(-1, -1);
+        this._renderKey = null;
+        this._refresh();
     }
 
     _setShown(shown) {
@@ -760,9 +845,9 @@ class Island extends St.Widget {
             if (!this.visible)
                 this.opacity = 0;
             this.show();
-            this.ease({opacity: 255, duration: 180, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            this._ease(this, {opacity: 255, duration: 180, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         } else {
-            this.ease({
+            this._ease(this, {
                 opacity: 0,
                 duration: 160,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
@@ -820,7 +905,7 @@ class Island extends St.Widget {
             }
             if (!reversing)
                 actor.opacity = 0;
-            actor.ease({opacity: 255, duration: 140, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            this._ease(actor, {opacity: 255, duration: 140, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         }
     }
 
@@ -847,11 +932,15 @@ class Island extends St.Widget {
         const [, toHeight] = this.get_preferred_height(toWidth);
         if (toWidth === fromWidth && toHeight === fromHeight && to === fromLayout)
             return;
+
+        const duration = this._animationDuration(220);
+        if (!duration)
+            return;
         this._applyGeometry(from, fromWidth, fromHeight);
 
-        const timeline = new Clutter.Timeline({actor: this, duration: 220});
+        const timeline = new Clutter.Timeline({actor: this, duration});
         timeline.connect('new-frame', () => {
-            const progress = Math.min(1, timeline.get_elapsed_time() / 220);
+            const progress = Math.min(1, timeline.get_elapsed_time() / duration);
             const p = 1 - Math.pow(1 - progress, 3);
             this._applyGeometry({
                 radius: lerp(from.radius, to.radius, p),
@@ -953,7 +1042,7 @@ class Island extends St.Widget {
 
     _setArtBackground(uri) {
         this._artBackground = uri ? `background-image: url("${uri}");` : '';
-        this._coverDotArt.style = this._artBackground;
+        this._updateCoverDot();
         this._coverDotFallback.visible = !uri;
         this._applyGeometry(this._geometry);
     }
