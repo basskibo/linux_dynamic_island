@@ -3,9 +3,9 @@
   "name": "Dynamic Island",
   "description": "iOS-style live island that shows what's playing (Spotify, browsers, any MPRIS player). Also shows volume and brightness, charger, screen recording, Bluetooth devices and download progress. Hover to expand, click to open the player.",
   "shell-version": [
-    "46"
+    "50"
   ],
   "settings-schema": "org.gnome.shell.extensions.dynamic-island",
-  "version-name": "3.4",
-  "url": "https://github.com/basskibo/linux_dynamic_island"
+  "version-name": "3.4-gnome50",
+  "url": "https://github.com/yassine-mathlouthi/linux_dynamic_island"
 }

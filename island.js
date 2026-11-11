@@ -1,6 +1,7 @@
 import Cairo from 'cairo';
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Graphene from 'gi://Graphene';
@@ -37,7 +38,7 @@ function buildLayouts(settings) {
         compact,
         // Slimmer resting island so it fits inside the top bar, a bigger cover eats into the padding first
         panelCompact: {...compact, padding: [panelPad, Math.max(0, 12 - tighten), panelPad, 3]},
-        expanded: {radius: 30, padding: [12, 16, 12, 12], spacing: SPACING, artSize: big, artRadius: radius(big, ART_RADIUS.rounded), expanded: true},
+        expanded: {radius: 32, topRadius: 0, padding: [10, 42, 20, 42], spacing: 12, artSize: Math.max(104, big), artRadius: 25, expanded: true},
     };
 }
 
@@ -57,11 +58,6 @@ const PANEL_SLOTS = {
     'panel-right': ['_rightBox', 0, 1],
 };
 
-// Damped spring (response 0.45s, damping 0.78 → ~2% overshoot), t in seconds → progress
-const OMEGA = 2 * Math.PI / 0.45;
-const ZETA = 0.78;
-const OMEGA_D = OMEGA * Math.sqrt(1 - ZETA * ZETA);
-const spring = t => 1 - Math.exp(-ZETA * OMEGA * t) * (Math.cos(OMEGA_D * t) + ZETA * OMEGA / OMEGA_D * Math.sin(OMEGA_D * t));
 const lerp = (a, b, p) => a + (b - a) * p;
 
 // Visualizer size per shape; levels animate toward random targets while playing
@@ -98,10 +94,11 @@ function roundedRect(cr, x, y, w, h) {
 const toGicon = icon => typeof icon === 'string' ? new Gio.ThemedIcon({name: icon}) : icon;
 
 export const Island = GObject.registerClass(
-class Island extends St.BoxLayout {
+class Island extends St.Widget {
     _init(settings) {
         super._init({
             style_class: 'di-island',
+            layout_manager: new Clutter.BinLayout(),
             reactive: true,
             track_hover: true,
             visible: false,
@@ -113,6 +110,13 @@ class Island extends St.BoxLayout {
         this._hasMusic = false;
         this._expanded = false;
         this._shown = false;
+        this._visibilitySerial = 0;
+        this._autoHideId = 0;
+        this._autoHidden = false;
+        this._activityKey = null;
+        this._renderKey = null;
+        this._dotBridgeId = 0;
+        this._destroying = false;
         this._trackKey = null;
         this._indicators = new Map();
         this._toastActive = false;
@@ -132,25 +136,30 @@ class Island extends St.BoxLayout {
         this._phase = 0;
         this._accent = accentGradient(settings.get_string('accent-color'));
 
-        this._art = new St.Bin({style_class: 'di-art', pivot_point: new Graphene.Point({x: 0.5, y: 0.5})});
+        this._art = new St.Bin({style_class: 'di-art', y_align: Clutter.ActorAlign.CENTER, pivot_point: new Graphene.Point({x: 0.5, y: 0.5})});
         this.add_child(this._art);
 
         // Gap the clock shows through in notch mode
         this._notch = new St.Widget({visible: false, x_expand: true});
         this._notch.connect('notify::x', () => this._reposition());
 
-        this._text = new St.BoxLayout({style_class: 'di-text', vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        this._text = new St.BoxLayout({style_class: 'di-text', orientation: Clutter.Orientation.VERTICAL, x_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this._source = new St.BoxLayout({style_class: 'di-source', visible: false});
         this._sourceIcon = new St.Icon({style_class: 'di-source-icon'});
         this._sourceLabel = new St.Label({style_class: 'di-source-label', y_align: Clutter.ActorAlign.CENTER});
         this._source.add_child(this._sourceIcon);
         this._source.add_child(this._sourceLabel);
+        this._dashboardHeading = new St.Label({text: 'NOW PLAYING', style_class: 'di-dashboard-heading', visible: false});
+        this._text.add_child(this._dashboardHeading);
         this._text.add_child(this._source);
         this._title = new St.Label({style_class: 'di-title'});
         this._artist = new St.Label({style_class: 'di-artist', visible: false});
         this._title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         this._artist.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         this._text.add_child(this._title);
+        this._album = new St.Label({style_class: 'di-album', visible: false});
+        this._album.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        this._text.add_child(this._album);
         this._text.add_child(this._artist);
         this.add_child(this._text);
         this.add_child(this._notch);
@@ -169,7 +178,38 @@ class Island extends St.BoxLayout {
         this._playButton.add_style_class_name('di-play');
         this._controls.add_child(this._playButton);
         this._controls.add_child(this._button('next', () => this._player?.next()));
-        this.add_child(this._controls);
+        this._text.add_child(this._controls);
+
+        this._calendar = new St.BoxLayout({
+            style_class: 'di-calendar', orientation: Clutter.Orientation.VERTICAL,
+            visible: false, y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._calendarStrip = new St.BoxLayout({style_class: 'di-calendar-strip'});
+        this._calendarMonth = new St.Label({style_class: 'di-calendar-month', y_align: Clutter.ActorAlign.CENTER});
+        this._calendarStrip.add_child(this._calendarMonth);
+        this._calendar.add_child(this._calendarStrip);
+        this._calendarWeek = new St.BoxLayout({style_class: 'di-calendar-week'});
+        this._calendarDays = [];
+        for (let i = 0; i < 5; i++) {
+            const column = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'di-calendar-day'});
+            const weekday = new St.Label({style_class: 'di-calendar-weekday', x_align: Clutter.ActorAlign.CENTER});
+            const date = new St.Label({style_class: 'di-calendar-date', x_align: Clutter.ActorAlign.CENTER});
+            column.add_child(weekday);
+            column.add_child(date);
+            this._calendarWeek.add_child(column);
+            this._calendarDays.push({column, weekday, date});
+        }
+        this._calendarStrip.add_child(this._calendarWeek);
+        this._calendarFooter = new St.Label({style_class: 'di-calendar-footer', x_align: Clutter.ActorAlign.CENTER});
+        const calendarButton = new St.Button({style_class: 'di-calendar-summary', child: this._calendarFooter});
+        calendarButton.connect('clicked', () => Main.panel.statusArea.dateMenu.menu.toggle());
+        this._calendar.add_child(calendarButton);
+        this.add_child(this._calendar);
+        this._updateCalendar();
+        this._calendarId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 30, () => {
+            this._updateCalendar();
+            return GLib.SOURCE_CONTINUE;
+        });
 
         this._indicatorBox = new St.BoxLayout({style_class: 'di-indicators', visible: false, y_align: Clutter.ActorAlign.CENTER});
         this.add_child(this._indicatorBox);
@@ -191,6 +231,67 @@ class Island extends St.BoxLayout {
         this._toastBox.add_child(this._toastLabel);
         this.add_child(this._toastBox);
 
+        // A separate header and horizontal body reproduce the attached notch,
+        // without changing the compact pill's content or event sources.
+        this._body = new St.BoxLayout({style_class: 'di-body'});
+        for (const child of this.get_children()) {
+            this.remove_child(child);
+            this._body.add_child(child);
+        }
+        this._content = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true, y_expand: true,
+        });
+        this._background = new St.DrawingArea({
+            x_expand: true, y_expand: true, visible: false,
+        });
+        this._background.connect('repaint', area => this._drawDashboardShell(area));
+        this.add_child(this._background);
+        this.add_child(this._content);
+        this._header = new St.BoxLayout({style_class: 'di-header', visible: false});
+        const nook = new St.BoxLayout({style_class: 'di-tab di-tab-active'});
+        nook.add_child(new St.Icon({icon_name: 'audio-headphones-symbolic', style_class: 'di-tab-icon'}));
+        nook.add_child(new St.Label({text: 'Nook', y_align: Clutter.ActorAlign.CENTER}));
+        this._header.add_child(nook);
+        const trayContent = new St.BoxLayout({style_class: 'di-tab'});
+        trayContent.add_child(new St.Icon({icon_name: 'mail-inbox-symbolic', style_class: 'di-tab-icon'}));
+        trayContent.add_child(new St.Label({text: 'Tray', y_align: Clutter.ActorAlign.CENTER}));
+        const tray = new St.Button({child: trayContent, style_class: 'di-header-button'});
+        tray.connect('clicked', () => Main.panel.statusArea.dateMenu.menu.toggle());
+        this._header.add_child(tray);
+        this._header.add_child(new St.Widget({x_expand: true}));
+        const settingsButton = new St.Button({
+            style_class: 'di-header-button',
+            child: new St.Icon({icon_name: 'emblem-system-symbolic', style_class: 'di-tab-icon'}),
+        });
+        settingsButton.connect('clicked', () => Gio.Subprocess.new(
+            ['gnome-extensions', 'prefs', 'dynamic-island@bjagetic'], Gio.SubprocessFlags.NONE));
+        this._header.add_child(settingsButton);
+        this._content.add_child(this._header);
+        this._content.add_child(this._body);
+
+        this._body.remove_child(this._art);
+        this._artTile = new St.Widget({layout_manager: new Clutter.FixedLayout(), y_align: Clutter.ActorAlign.CENTER});
+        this._artTile.add_child(this._art);
+        this._artBadge = new St.Icon({
+            style_class: 'di-art-badge', visible: false,
+            width: 30, height: 30,
+        });
+        this._artTile.add_child(this._artBadge);
+        this._body.insert_child_at_index(this._artTile, 0);
+
+        const avatarPath = `/var/lib/AccountsService/icons/${GLib.get_user_name()}`;
+        this._avatar = new St.Button({style_class: 'di-avatar', visible: false, y_align: Clutter.ActorAlign.CENTER});
+        if (GLib.file_test(avatarPath, GLib.FileTest.EXISTS))
+            this._avatar.style = `background-image: url("${Gio.File.new_for_path(avatarPath).get_uri()}");`;
+        else
+            this._avatar.child = new St.Icon({icon_name: 'camera-web-symbolic', icon_size: 32});
+        const camera = GioUnix.DesktopAppInfo.new('org.gnome.Snapshot.desktop');
+        this._avatar.reactive = !!camera;
+        this._avatar.connect('clicked', () => camera?.launch([], global.create_app_launch_context(0, -1)));
+        this._body.insert_child_above(this._avatar, this._calendar);
+
+        this._createCoverDot();
         this._place();
         this._applyGeometry(this._compact());
 
@@ -220,6 +321,15 @@ class Island extends St.BoxLayout {
     }
 
     _onDestroy() {
+        this._destroying = true;
+        if (this._dotBridgeId)
+            GLib.source_remove(this._dotBridgeId);
+        this._dotBridgeId = 0;
+        this._coverDot?.destroy();
+        this._coverDot = null;
+        if (this._calendarId)
+            GLib.source_remove(this._calendarId);
+        this._cancelAutoHide();
         GLib.source_remove(this._eqId);
         this._eqTimeline.stop();
         if (this._toastId)
@@ -263,6 +373,7 @@ class Island extends St.BoxLayout {
     }
 
     _updateLayouts() {
+        this._renderKey = null;
         this._layouts = buildLayouts(this._settings);
         this._refresh();
     }
@@ -363,13 +474,148 @@ class Island extends St.BoxLayout {
         return button;
     }
 
+    _drawDashboardShell(area) {
+        const [w, h] = area.get_surface_size();
+        const cr = area.get_context();
+        if (w <= 0 || h <= 0) {
+            cr.$dispose();
+            return;
+        }
+        // Concave top shoulders merge into the bar; the body is inset below
+        // them. Draw at the actual allocation so no image sizing can square it.
+        const shoulder = Math.min(22, w / 8, h / 4);
+        const bottom = Math.min(32, (w - 2 * shoulder) / 4, h / 3);
+        const k = 0.5522847498;
+        cr.moveTo(0, 0);
+        cr.lineTo(w, 0);
+        cr.curveTo(w - shoulder * k, 0, w - shoulder, shoulder * (1 - k), w - shoulder, shoulder);
+        cr.lineTo(w - shoulder, h - bottom);
+        cr.curveTo(w - shoulder, h - bottom * (1 - k), w - shoulder - bottom * (1 - k), h, w - shoulder - bottom, h);
+        cr.lineTo(shoulder + bottom, h);
+        cr.curveTo(shoulder + bottom * (1 - k), h, shoulder, h - bottom * (1 - k), shoulder, h - bottom);
+        cr.lineTo(shoulder, shoulder);
+        cr.curveTo(shoulder, shoulder * (1 - k), shoulder * k, 0, 0, 0);
+        cr.closePath();
+        cr.setSourceRGBA(0, 0, 0, 1);
+        cr.fill();
+        cr.$dispose();
+    }
+
+    _updateCalendar() {
+        const now = GLib.DateTime.new_now_local();
+        this._calendarMonth.text = now.format('%b');
+        const firstDay = now.add_days(-2);
+        this._calendarDays.forEach(({column, weekday, date}, index) => {
+            const day = firstDay.add_days(index);
+            weekday.text = day.format('%a');
+            date.text = day.format('%d');
+            if (day.format('%F') === now.format('%F'))
+                column.add_style_class_name('di-calendar-today');
+            else
+                column.remove_style_class_name('di-calendar-today');
+        });
+        // This is a date summary, not an events feed: no calendar access required.
+        this._calendarFooter.text = `▦  ${now.format('%A, %B %e')}`;
+    }
+
+    _createCoverDot() {
+        this._coverDotArt = new St.Bin({style_class: 'di-cover-dot-art', width: 20, height: 20});
+        this._coverDotFallback = new St.Icon({icon_name: 'audio-x-generic-symbolic', icon_size: 13});
+        this._coverDotArt.child = this._coverDotFallback;
+        this._coverDot = new St.Button({
+            style_class: 'di-cover-dot', child: this._coverDotArt,
+            track_hover: true, can_focus: true, visible: false,
+            y_align: Clutter.ActorAlign.CENTER,
+            accessible_name: 'Show Dynamic Island',
+        });
+        this._coverDot.connect('clicked', () => this._revealFromCoverDot());
+        this._coverDot.connect('notify::hover', () => {
+            if (this._destroying)
+                return;
+            if (this._coverDot.hover && this._autoHidden)
+                this._revealFromCoverDot();
+            else
+                this._onHover();
+        });
+        const clock = Main.panel.statusArea.dateMenu?.container;
+        const box = clock?.get_parent() ?? Main.panel._centerBox;
+        const index = clock ? box.get_children().indexOf(clock) + 1 : -1;
+        box.insert_child_at_index(this._coverDot, index);
+    }
+
+    _syncCoverDot() {
+        if (this._coverDot && !this._destroying)
+            this._coverDot.visible = this._autoHidden && this._hasMusic && !this.visible;
+    }
+
+    _revealFromCoverDot() {
+        if (this._destroying || !this._hasMusic)
+            return;
+        if (this._hoverId)
+            GLib.source_remove(this._hoverId);
+        this._hoverId = 0;
+        if (this._dotBridgeId)
+            GLib.source_remove(this._dotBridgeId);
+        // Allow the pointer to cross from the disappearing dot into the panel
+        // without immediately collapsing it or starting the hide countdown.
+        this._dotBridgeId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
+            this._dotBridgeId = 0;
+            this._onHover();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._activity();
+        this._expanded = true;
+        this._refresh();
+    }
+
+    _cancelAutoHide() {
+        if (this._autoHideId)
+            GLib.source_remove(this._autoHideId);
+        this._autoHideId = 0;
+    }
+
+    _pointerOnIsland() {
+        return this.hover || !!this._dotBridgeId || !!this._coverDot?.hover ||
+            (this._isNotch() && Main.panel.statusArea.dateMenu.hover);
+    }
+
+    _scheduleAutoHide() {
+        this._cancelAutoHide();
+        if (this._autoHidden || this._pointerOnIsland())
+            return;
+        this._autoHideId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 10, () => {
+            this._autoHideId = 0;
+            if (!this._pointerOnIsland()) {
+                this._autoHidden = true;
+                // Fade the current shape out; shrinking it at the same time
+                // rebuilds the entire layout during the closing animation.
+                this._refresh();
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _activity() {
+        this._autoHidden = false;
+        this._scheduleAutoHide();
+    }
+
     // source is the app playing: {name, icon}
     setPlayer(player, source) {
+        const activityKey = player
+            ? JSON.stringify([source?.name, player.trackTitle, player.trackArtists, player.trackCoverUrl, player.status])
+            : null;
+        if (player !== this._player || activityKey !== this._activityKey) {
+            this._activityKey = activityKey;
+            this._activity();
+        }
         this._player = player;
         this._hasMusic = !!player && !!player.trackTitle && player.status !== 'Stopped';
         if (this._hasMusic) {
+            this._coverDot.accessible_name = `Show ${player.trackTitle}`;
             this._playButton.child.gicon = icon(player.status === 'Playing' ? 'pause' : 'play');
             this._sourceIcon.gicon = toGicon(source.icon);
+            this._artBadge.gicon = toGicon(source.icon);
             this._sourceLabel.text = source.name;
             this._source.visible = this._expanded && !!source.name;
             const key = `${player.trackTitle}\n${player.trackArtists.join(', ')}\n${player.trackCoverUrl}`;
@@ -385,6 +631,7 @@ class Island extends St.BoxLayout {
 
     // Temporary takeover of the island (volume, brightness, charger, Bluetooth)
     toast(icon, text, {level = null, color = null, duration = 2500} = {}) {
+        this._activity();
         this._toastIcon.gicon = toGicon(icon);
         this._toastIcon.style = color ? `color: ${color};` : null;
         this._toastLabel.text = text;
@@ -422,6 +669,7 @@ class Island extends St.BoxLayout {
             if (chip) {
                 chip.destroy();
                 this._indicators.delete(key);
+                this._activity();
                 this._refresh();
             }
             return;
@@ -437,70 +685,118 @@ class Island extends St.BoxLayout {
             this._indicatorBox.add_child(chip);
             this._indicators.set(key, chip);
         }
+        const indicatorState = JSON.stringify([String(opts.icon), opts.text, opts.color]);
+        if (chip._activityState !== indicatorState) {
+            chip._activityState = indicatorState;
+            this._activity();
+        }
         const [icon, label] = chip.child.get_children();
         icon.gicon = toGicon(opts.icon);
         icon.style = opts.color ? `color: ${opts.color};` : null;
         label.text = opts.text ?? '';
         label.visible = !!opts.text;
-        if (added)
-            this._refresh();
+        this._refresh();
     }
 
     // Shows/hides each part for the current state, springing the island to its new size
     _refresh() {
         const hasIndicators = this._indicators.size > 0;
-        this._morph(() => {
+        // Media/progress signals often repeat the same state. Do not interrupt
+        // an in-flight morph or remeasure the whole dashboard for those signals.
+        const renderKey = JSON.stringify([
+            this._hasMusic, this._expanded, this._toastActive, this._position,
+            this._title.text, this._artist.text, this._album.text,
+            this._toastLabel.text, this._toastLabel.visible, this._toastBar.visible,
+            [...this._indicators.values()].map(chip => chip._activityState),
+            this._settings.get_boolean('art-compact'),
+            this._settings.get_int('text-width'), this._settings.get_string('eq-style'),
+        ]);
+        if (renderKey !== this._renderKey) {
+            this._renderKey = renderKey;
+            this._morph(() => {
             const music = this._hasMusic && !this._toastActive;
             const expanded = music && this._expanded;
             const notch = this._isNotch() && !expanded;
             this._art.visible = music && (expanded || this._settings.get_boolean('art-compact'));
+            this._artTile.visible = this._art.visible;
+            this._artBadge.visible = expanded;
             this._text.visible = music && !notch;
             this._notch.visible = notch;
             this._artist.visible = expanded;
+            this._album.visible = expanded && !!this._album.text;
             this._source.visible = expanded && !!this._sourceLabel.text;
             this._controls.visible = expanded;
+            this._dashboardHeading.visible = false;
+            this._header.visible = expanded;
+            this._background.visible = expanded;
+            this._avatar.visible = expanded;
+            this._setCachedStyle(this._body, `spacing: ${expanded ? 16 : SPACING}px;`);
+            this._calendar.visible = expanded;
+            if (expanded)
+                this.add_style_class_name('di-dashboard');
+            else
+                this.remove_style_class_name('di-dashboard');
             this._eq.visible = music && !expanded;
             this._indicatorBox.visible = !this._toastActive && hasIndicators;
             this._toastBox.visible = this._toastActive;
-        });
-        this._setShown(this._hasMusic || hasIndicators || this._toastActive);
+            });
+        }
+        this._setShown(!this._autoHidden && (this._hasMusic || hasIndicators || this._toastActive));
         this._fitSlot();
+        this._syncCoverDot();
     }
 
     _setShown(shown) {
         if (shown === this._shown)
             return;
         this._shown = shown;
+        const serial = ++this._visibilitySerial;
+        // Preserve the current opacity when reversing a transition. Never restart
+        // from zero or let an obsolete hide completion hide a newly shown island.
+        for (const property of ['opacity', 'scale-x', 'scale-y'])
+            this.remove_transition(property);
+        this.set({scale_x: 1, scale_y: 1});
         if (shown) {
+            if (!this.visible)
+                this.opacity = 0;
             this.show();
-            this.set({opacity: 0, scale_x: 0.5, scale_y: 0.5});
-            this.ease({opacity: 255, scale_x: 1, scale_y: 1, duration: 500, mode: Clutter.AnimationMode.EASE_OUT_BACK});
+            this.ease({opacity: 255, duration: 180, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         } else {
             this.ease({
                 opacity: 0,
-                scale_x: 0.5,
-                scale_y: 0.5,
-                duration: 220,
-                mode: Clutter.AnimationMode.EASE_IN_QUAD,
-                onComplete: () => this.hide(),
+                duration: 160,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    if (serial === this._visibilitySerial && !this._shown) {
+                        this.hide();
+                        this._expanded = false;
+                        this._renderKey = null;
+                        this._syncCoverDot();
+                    }
+                },
             });
         }
     }
 
     _onHover() {
+        if (this._destroying)
+            return;
+        if (this._pointerOnIsland())
+            this._cancelAutoHide();
+        else
+            this._scheduleAutoHide();
         // Small hover intent delay so passing the mouse over the island doesn't make it jump
         if (this._hoverId)
             GLib.source_remove(this._hoverId);
         this._hoverId = 0;
         const dateMenu = Main.panel.statusArea.dateMenu;
         // Open calendar collapses the island so it doesn't sit under the menu
-        const hover = this._isNotch()
-            ? (this.hover || dateMenu.hover) && !dateMenu.menu.isOpen
-            : this.hover;
+        const hover = this._pointerOnIsland() &&
+            (!this._isNotch() || !dateMenu.menu.isOpen);
         // In click mode hovering only closes the details (when the pointer leaves)
         if (hover && this._settings.get_string('expand-on') === 'click')
             return;
-        this._hoverId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, hover ? 90 : 220, () => {
+        this._hoverId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, hover ? 40 : 140, () => {
             this._hoverId = 0;
             this._setExpanded(hover);
             return GLib.SOURCE_REMOVE;
@@ -514,15 +810,22 @@ class Island extends St.BoxLayout {
         this._refresh();
         if (!this._hasMusic || this._toastActive)
             return;
-        // Newly revealed content fades in once the island has started growing
-        for (const actor of expanded ? [this._source, this._artist, this._controls] : [this._eq]) {
-            actor.opacity = 0;
-            actor.ease({opacity: 255, duration: 250, delay: 120, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+        // Fade alongside the resize, not after a second delayed animation.
+        for (const actor of [this._artist, this._controls, this._eq]) {
+            const reversing = !!actor.get_transition('opacity');
+            actor.remove_transition('opacity');
+            if (!actor.visible) {
+                actor.opacity = 255;
+                continue;
+            }
+            if (!reversing)
+                actor.opacity = 0;
+            actor.ease({opacity: 255, duration: 140, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         }
     }
 
-    // Applies a layout change, then springs size, corners, padding and cover to the new state.
-    // Animated per frame and rounded to whole pixels so text and icons stay sharp while moving.
+    // Preserve the resize animation, with cached styles and no delayed second stage.
+    // Whole-pixel geometry keeps text and icons sharp while moving.
     _morph(change) {
         const [fromWidth, fromHeight] = this.get_size();
         const from = this._geometry;
@@ -546,9 +849,10 @@ class Island extends St.BoxLayout {
             return;
         this._applyGeometry(from, fromWidth, fromHeight);
 
-        const timeline = new Clutter.Timeline({actor: this, duration: 650});
+        const timeline = new Clutter.Timeline({actor: this, duration: 220});
         timeline.connect('new-frame', () => {
-            const p = spring(timeline.get_elapsed_time() / 1000);
+            const progress = Math.min(1, timeline.get_elapsed_time() / 220);
+            const p = 1 - Math.pow(1 - progress, 3);
             this._applyGeometry({
                 radius: lerp(from.radius, to.radius, p),
                 topRadius: lerp(from.topRadius ?? from.radius, to.topRadius ?? to.radius, p),
@@ -569,6 +873,13 @@ class Island extends St.BoxLayout {
         timeline.start();
     }
 
+    _setCachedStyle(actor, style) {
+        if (actor._diCachedStyle === style)
+            return;
+        actor._diCachedStyle = style;
+        actor.style = style;
+    }
+
     _applyGeometry(geometry, width, height) {
         this._geometry = geometry;
         const px = v => `${Math.max(0, Math.round(v))}px`;
@@ -576,57 +887,44 @@ class Island extends St.BoxLayout {
         const bottom = px(geometry.radius);
         // Width 0 = size to content, below 0 is handled by the layouts; music layouts only, toasts keep their own size
         const minWidth = this._hasMusic && !this._toastActive ? this._settings.get_int('width') : 0;
-        this._text.style = `max-width: ${this._settings.get_int('text-width')}px;`;
-        this.style = `border-radius: ${top} ${top} ${bottom} ${bottom}; padding: ${geometry.padding.map(px).join(' ')};` +
-            ` spacing: ${px(geometry.spacing)};` + (minWidth > 0 ? ` min-width: ${minWidth}px;` : '');
+        this._setCachedStyle(this._text, this._layout.expanded
+            ? 'min-width: 160px; max-width: 160px; spacing: 4px;'
+            : `max-width: ${this._settings.get_int('text-width')}px;`);
+        const shellStyle = this._layout.expanded
+            ? 'background-image: none; background-color: transparent; border-radius: 0;'
+            : `background-image: none; background-color: #000; border-radius: ${top} ${top} ${bottom} ${bottom};`;
+        this._setCachedStyle(this, shellStyle + (minWidth > 0 ? ` min-width: ${minWidth}px;` : ''));
+        this._setCachedStyle(this._content, `padding: ${geometry.padding.map(px).join(' ')}; spacing: ${px(geometry.spacing)};`);
+        // St.DrawingArea repaints automatically on allocation changes. Forcing
+        // another repaint here also uploaded its texture on unchanged frames.
         const artSize = Math.round(geometry.artSize);
         this._art.set_size(artSize, artSize);
+        this._artTile.set_size(artSize, artSize);
+        this._art.set_position(0, 0);
+        // Fixed coordinates avoid BinLayout centering the source icon.
+        this._artBadge.set_position(Math.max(0, artSize - 25), Math.max(0, artSize - 25));
         const border = ART_BORDER[this._settings.get_string('art-border')]?.(this._settings);
-        this._art.style = `${this._artBackground} border-radius: ${px(geometry.artRadius)};` + (border ? ` border: ${border};` : '');
+        this._setCachedStyle(this._art, `${this._artBackground} border-radius: ${px(geometry.artRadius)};` + (border ? ` border: ${border};` : ''));
         if (width !== undefined)
             this.set_size(Math.round(width), Math.round(height));
     }
 
     _swapTrack(player) {
-        const apply = () => this._morph(() => {
-            this._title.text = player.trackTitle;
-            this._artist.text = player.trackArtists.join(', ');
-            this._setArt(player.trackCoverUrl);
-        });
-        if (!this._shown || !this._text.visible) {
-            apply();
-            return;
+        // Track notifications can arrive in bursts during startup. Update in place
+        // rather than queuing fade-out callbacks with stale player metadata.
+        for (const actor of [this._text, this._art]) {
+            for (const property of ['opacity', 'translation-y', 'scale-x', 'scale-y'])
+                actor.remove_transition(property);
+            actor.set({opacity: 255, translation_y: 0, scale_x: 1, scale_y: 1});
         }
-
-        // Old track slides up and fades, new one slides in from below
-        this._text.ease({
-            opacity: 0,
-            translation_y: -8,
-            duration: 160,
-            mode: Clutter.AnimationMode.EASE_IN_QUAD,
-            onComplete: () => {
-                apply();
-                this._text.translation_y = 8;
-                this._text.ease({opacity: 255, translation_y: 0, duration: 380, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
-            },
-        });
-        this._art.ease({
-            scale_x: 0.6,
-            scale_y: 0.6,
-            opacity: 0,
-            duration: 160,
-            mode: Clutter.AnimationMode.EASE_IN_QUAD,
-            onComplete: () => this._art.ease({
-                scale_x: 1,
-                scale_y: 1,
-                opacity: 255,
-                duration: 500,
-                mode: Clutter.AnimationMode.EASE_OUT_BACK,
-            }),
-        });
+        this._title.text = player.trackTitle;
+        this._artist.text = player.trackArtists.join(', ');
+        this._album.text = player._playerProxy?.Metadata?.['xesam:album']?.deepUnpack() ?? '';
+        this._setArt(player.trackCoverUrl);
     }
 
     _setArt(url) {
+        this._artUrl = url;
         if (!url.startsWith('http')) {
             this._setArtBackground(url.startsWith('file://') ? url : null);
             return;
@@ -648,12 +946,15 @@ class Island extends St.BoxLayout {
                         console.warn(`dynamic-island: cover download failed: ${e.message}`);
                     return;
                 }
-                this._setArtBackground(dest.get_uri());
+                if (!this._artCancellable.is_cancelled() && this._artUrl === url)
+                    this._setArtBackground(dest.get_uri());
             });
     }
 
     _setArtBackground(uri) {
         this._artBackground = uri ? `background-image: url("${uri}");` : '';
+        this._coverDotArt.style = this._artBackground;
+        this._coverDotFallback.visible = !uri;
         this._applyGeometry(this._geometry);
     }
 
@@ -674,7 +975,7 @@ class Island extends St.BoxLayout {
 
     // Eases levels toward their targets each frame; skips repaints once a paused visualizer has settled
     _stepEq(dt) {
-        if (!this._eq.visible)
+        if (!this._shown || !this.visible || !this._eq.visible || this._timeline)
             return;
         const playing = this._player?.status === 'Playing';
         const ease = 1 - Math.exp(-dt * 10);
@@ -789,7 +1090,7 @@ class Island extends St.BoxLayout {
         else if (horizontal === 'right')
             x = monitor.x + monitor.width - this.width - margin;
         const y = vertical === 'top'
-            ? monitor.y + Main.panel.height + margin
+            ? monitor.y + Main.panel.height + (this._layout.expanded ? 0 : margin)
             : monitor.y + monitor.height - this.height - margin;
         this.set_position(x, y);
     }

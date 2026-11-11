@@ -1,3 +1,5 @@
 *.zip
 schemas/gschemas.compiled
 .shexli-check/
+.venv/
+__pycache__/
