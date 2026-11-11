@@ -21,3 +21,38 @@
 .di-toast-label { color: #fff; font-weight: bold; font-size: 10pt; max-width: 300px; }
 .di-level { height: 8px; border-radius: 4px; background-color: rgba(255,255,255,0.2); }
 .di-level-fill { height: 8px; border-radius: 4px; background-color: #fff; }
+
+/* Attached notch: a Cairo layer draws pure-black curved shoulders and lower corners. */
+.di-dashboard { border: none; box-shadow: none; }
+.di-header { spacing: 8px; min-height: 24px; }
+.di-tab { spacing: 6px; padding: 4px 9px; color: #eeedf3; font-size: 10pt; font-weight: bold; }
+.di-tab-active { background-color: rgba(255,255,255,0.07); border-radius: 14px; }
+.di-tab-icon { icon-size: 14px; color: #dedde5; }
+.di-header-button { border-radius: 12px; padding: 2px; }
+.di-header-button:hover { background-color: rgba(255,255,255,0.09); }
+.di-dashboard .di-title { font-size: 11pt; font-weight: bold; color: #f8f7fc; }
+.di-album { font-size: 10pt; color: #c9c6d0; }
+.di-dashboard .di-artist { color: #92909c; font-size: 9pt; }
+.di-dashboard .di-btn { padding: 6px 7px; }
+.di-dashboard .di-btn StIcon { icon-size: 15px; }
+.di-dashboard .di-play StIcon { icon-size: 18px; }
+.di-art-badge { icon-size: 22px; padding: 4px; background-color: #18181d; border-radius: 8px; color: white; }
+.di-calendar { spacing: 18px; padding: 0 6px; }
+.di-calendar-strip { spacing: 12px; }
+.di-calendar-month { color: #f5f3fa; font-size: 20pt; font-weight: bold; }
+.di-calendar-week { spacing: 3px; }
+.di-calendar-day { min-width: 22px; spacing: 5px; padding: 3px 1px; }
+.di-calendar-weekday { color: #57545f; font-size: 6.5pt; font-weight: bold; }
+.di-calendar-date { color: #96909e; font-size: 10pt; font-weight: bold; }
+.di-calendar-today .di-calendar-weekday { color: #9d98a6; }
+.di-calendar-today .di-calendar-date { color: #2879ff; font-size: 15pt; }
+.di-calendar-summary { padding: 4px 6px; border-radius: 8px; }
+.di-calendar-summary:hover { background-color: rgba(255,255,255,0.05); }
+.di-calendar-footer { color: #8d8796; font-size: 9pt; }
+.di-avatar { width: 80px; height: 80px; border-radius: 40px; background-size: cover; background-color: #19181f; }
+.di-avatar:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.25); }
+
+/* Hidden-island launcher, immediately beside the panel clock. */
+.di-cover-dot { padding: 0 5px; margin: 0 2px; border-radius: 14px; }
+.di-cover-dot:hover, .di-cover-dot:focus { background-color: rgba(255,255,255,0.12); }
+.di-cover-dot-art { border-radius: 10px; background-size: cover; background-color: #25252b; color: #ddd; }

@@ -80,6 +80,42 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         group.add(expandOn);
         page.add(group);
 
+        const behavior = new Adw.PreferencesGroup({title: 'Auto-hide'});
+        behavior.add(this._switchRow(settings, 'auto-hide-enabled', 'Auto-hide the island',
+            'Activity reveals it again; hovering pauses the countdown'));
+        const hideDelay = this._spinRow(settings, 'auto-hide-delay', 'Hide after',
+            'Seconds after leaving the island (1–300)', 1, 300);
+        settings.bind('auto-hide-enabled', hideDelay, 'sensitive', Gio.SettingsBindFlags.GET);
+        behavior.add(hideDelay);
+        page.add(behavior);
+
+        const launcher = new Adw.PreferencesGroup({title: 'Clock-side cover launcher'});
+        launcher.add(this._switchRow(settings, 'cover-dot-enabled', 'Show cover-art circle',
+            'Appears only after auto-hide; hover or click to reopen the dashboard'));
+        const dotSize = this._spinRow(settings, 'cover-dot-size', 'Circle size',
+            'Diameter in pixels (12–28)', 12, 28);
+        settings.bind('cover-dot-enabled', dotSize, 'sensitive', Gio.SettingsBindFlags.GET);
+        launcher.add(dotSize);
+        page.add(launcher);
+
+        const dashboard = new Adw.PreferencesGroup({title: 'Expanded dashboard'});
+        dashboard.add(this._switchRow(settings, 'dashboard-calendar', 'Date strip',
+            'Show the live five-day calendar and date summary'));
+        dashboard.add(this._switchRow(settings, 'dashboard-account', 'Account / Camera tile',
+            'Show your account photo; clicking opens GNOME Camera when installed'));
+        dashboard.add(this._switchRow(settings, 'dashboard-header', 'Nook / Tray header',
+            'Show the header, notification shortcut, and settings button'));
+        page.add(dashboard);
+
+        const animation = new Adw.PreferencesGroup({title: 'Interface animations'});
+        animation.add(this._switchRow(settings, 'animations-enabled', 'Animate transitions',
+            'Opening, closing, resizing, and feedback; also respects GNOME’s animation setting'));
+        const animationSpeed = this._spinRow(settings, 'animation-speed', 'Animation speed',
+            'Percentage: 100 is normal, 200 is twice as fast, 50 is half speed', 25, 200, 5);
+        settings.bind('animations-enabled', animationSpeed, 'sensitive', Gio.SettingsBindFlags.GET);
+        animation.add(animationSpeed);
+        page.add(animation);
+
         const cover = new Adw.PreferencesGroup({title: 'Cover art'});
         const artSize = new Adw.SpinRow({
             title: 'Size',
@@ -151,6 +187,21 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         }
         page.add(features);
         window.add(page);
+    }
+
+    _switchRow(settings, key, title, subtitle) {
+        const row = new Adw.SwitchRow({title, subtitle});
+        settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
+        return row;
+    }
+
+    _spinRow(settings, key, title, subtitle, lower, upper, step = 1) {
+        const row = new Adw.SpinRow({
+            title, subtitle,
+            adjustment: new Gtk.Adjustment({lower, upper, step_increment: step, page_increment: step * 5}),
+        });
+        settings.bind(key, row, 'value', Gio.SettingsBindFlags.DEFAULT);
+        return row;
     }
 
     _choiceRow(settings, key, title, choices) {

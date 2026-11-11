@@ -10,6 +10,7 @@ export class OsdSource {
         this._island = island;
         this._settings = settings;
         this._originalShow = null;
+        this._originalShowAll = null;
         this._settings.connectObject('changed::show-volume', () => this._sync(), this);
         this._sync();
     }
@@ -27,9 +28,27 @@ export class OsdSource {
         const osd = Main.osdWindowManager;
         const originalShow = osd.show;
         this._originalShow = originalShow;
+        const originalShowAll = osd.showAll;
+        this._originalShowAll = originalShowAll;
+        osd.showAll = (...args) => {
+            try {
+                const [icon, label, level] = args;
+                if (typeof icon !== 'string' && !(icon instanceof Gio.Icon))
+                    throw new Error(`unexpected icon ${icon}`);
+                this._island.toast(icon, Number.isFinite(level) ? '' : String(label ?? ''), {
+                    level: Number.isFinite(level) ? level : null,
+                    duration: 1500,
+                });
+            } catch (e) {
+                console.warn(`Dynamic Island: volume OSD failed, using shell OSD: ${e}`);
+                originalShowAll.apply(osd, args);
+            }
+        };
         osd.show = (...args) => {
             try {
-                const [, icon, label, level] = args;
+                const [icon, label, levels] = args;
+                const entry = Object.values(levels ?? {}).find(value => value != null);
+                const level = entry?.level;
                 if (typeof icon !== 'string' && !(icon instanceof Gio.Icon))
                     throw new Error(`unexpected icon ${icon}`);
                 const hasLevel = Number.isFinite(level);
@@ -45,7 +64,9 @@ export class OsdSource {
         if (!this._originalShow)
             return;
         Main.osdWindowManager.show = this._originalShow;
+        Main.osdWindowManager.showAll = this._originalShowAll;
         this._originalShow = null;
+        this._originalShowAll = null;
     }
 
     destroy() {
