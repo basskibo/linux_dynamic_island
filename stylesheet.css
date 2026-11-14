@@ -56,3 +56,18 @@
 .di-cover-dot { padding: 0 5px; margin: 0 2px; border-radius: 14px; }
 .di-cover-dot:hover, .di-cover-dot:focus { background-color: rgba(255,255,255,0.12); }
 .di-cover-dot-art { border-radius: 10px; background-size: cover; background-color: #25252b; color: #ddd; }
+
+.di-notice { spacing: 12px; }
+.di-notice-row { spacing: 14px; }
+.di-notice-open { padding: 2px; border-radius: 10px; text-align: left; }
+.di-notice-open:hover, .di-notice-open:focus { background-color: rgba(255,255,255,0.04); }
+.di-notice-icon { icon-size: 36px; margin-top: 3px; }
+.di-notice-text { spacing: 5px; }
+.di-notice-app { color: #9b98a5; font-size: 8.5pt; font-weight: bold; }
+.di-notice-title { color: #fff; font-size: 11pt; font-weight: bold; }
+.di-notice-body { color: #c3bfce; font-size: 9.5pt; }
+.di-notice-close { padding: 6px; border-radius: 12px; color: #aaa6b3; }
+.di-notice-close:hover, .di-notice-close:focus { background-color: rgba(255,255,255,0.14); color: #fff; }
+.di-notice-actions { spacing: 8px; margin-left: 50px; margin-top: 8px; }
+.di-notice-action { padding: 6px 10px; border-radius: 10px; background-color: rgba(255,255,255,0.08); color: #fff; font-size: 9pt; }
+.di-notice-action:hover, .di-notice-action:focus { background-color: rgba(255,255,255,0.17); }

@@ -179,6 +179,20 @@ export default class DynamicIslandPrefs extends ExtensionPreferences {
         visualizer.add(color);
         page.add(visualizer);
 
+        const notifications = new Adw.PreferencesGroup({title: 'Notifications'});
+        notifications.add(this._switchRow(settings, 'show-notifications', 'App notifications in the island',
+            'Replaces normal banners; keeps history and GNOME’s Do Not Disturb policy'));
+        notifications.add(new Adw.ActionRow({
+            title: 'Notification display time',
+            subtitle: 'Uses “Hide after” above, even if auto-hide is off. Hover to pause; click to open, or × to hide. Incoming notifications are queued.',
+        }));
+        page.add(notifications);
+
+        const integrations = new Adw.PreferencesGroup({title: 'Other extensions'});
+        integrations.add(this._switchRow(settings, 'caffeine-manual-feedback', 'Only manual Caffeine feedback',
+            'If Caffeine is installed, keep automation unchanged but silent. Show status only for manual toggles, never in fullscreen.'));
+        page.add(integrations);
+
         const features = new Adw.PreferencesGroup({title: 'Show in island'});
         for (const [key, title] of FEATURES) {
             const row = new Adw.SwitchRow({title});

@@ -2,13 +2,15 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {Island} from './island.js';
 import {BatterySource} from './sources/battery.js';
+import {CaffeineFeedbackSource} from './sources/caffeine.js';
 import {BluetoothSource} from './sources/bluetooth.js';
 import {MediaSource} from './sources/media.js';
 import {OsdSource} from './sources/osd.js';
+import {NotificationSource} from './sources/notifications.js';
 import {ProgressSource} from './sources/progress.js';
 import {RecordingSource} from './sources/recording.js';
 
-const SOURCES = [MediaSource, OsdSource, BatterySource, RecordingSource, BluetoothSource, ProgressSource];
+const SOURCES = [MediaSource, OsdSource, BatterySource, RecordingSource, BluetoothSource, ProgressSource, NotificationSource, CaffeineFeedbackSource];
 
 export default class DynamicIslandExtension extends Extension {
     enable() {

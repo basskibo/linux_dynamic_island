@@ -28,6 +28,7 @@ This is Yassine Mathlouthi's GNOME 50 fork of [Dynamic Island by basskibo / Boja
 - **Configurable auto-hide:** defaults to 10 seconds. Song, playback, or action changes reveal the island again. Hovering pauses the countdown; leaving starts a fresh countdown.
 - **Cover-art launcher:** after the island fully hides, a small circular cover appears immediately right of the top-bar clock. Hover or click to reopen the expanded dashboard.
 - **Smoother transitions:** shorter hover delays, cached styles, fewer redundant layout rebuilds, and no simultaneous resize during auto-hide.
+- **Notifications inside the island:** eligible app banners appear as temporary cards with app icon, title, message, open/close controls, and up to three action buttons. Incoming notifications queue by urgency and use your auto-hide timeout; hovering pauses the countdown. Closing a card keeps it in GNOME’s notification history. Clicking it activates the app’s notification normally.
 
 The original MPRIS media support (Spotify, supported browsers, and other players), configurable positions/visualizers, and battery, Bluetooth, recording, and progress sources remain available.
 
@@ -77,6 +78,10 @@ All of these apply live from the extension preferences:
 | Clock-side cover launcher | Enable / disable; circle diameter from 12–28 pixels | On, 20 pixels |
 | Expanded dashboard | Show / hide date strip, account / Camera tile, and Nook / Tray header independently | All on |
 | Interface animations | Enable / disable; speed from 25–200% (higher is faster) | On, 100% |
+| Notifications | Replace normal app banners with island cards | On |
+| Other extensions | Keep automatic Caffeine changes silent; show feedback only for manual toggles outside fullscreen | On |
+
+Notification cards use the **Hide after** value even when island auto-hide is disabled. GNOME still decides which banners are eligible: app preferences, Do Not Disturb (with GNOME’s critical-alert exceptions), and fullscreen rules remain in effect. Cards are cleared on lock; lock-screen banners stay under GNOME’s control. Additional actions and full message text remain accessible in notification history. Turn off **App notifications in the island** to restore normal banners.
 
 The cover launcher appears only after auto-hide, so turning auto-hide off also keeps the launcher hidden. Hiding the dashboard header does not prevent opening preferences with the command above. Interface transitions also respect GNOME’s system-wide animation setting; the music visualizer and optional vinyl spin remain separate effects.
 
@@ -95,6 +100,10 @@ On Wayland, log out and back in to load changed JavaScript reliably. Preferences
 gnome-extensions disable dynamic-island@bjagetic
 gnome-extensions uninstall dynamic-island@bjagetic
 ```
+
+## Caffeine integration
+
+When [Caffeine](https://github.com/eonpatapon/gnome-shell-extension-caffeine) is installed, **Only manual Caffeine feedback** suppresses automatic enabled/disabled messages (for example on leaving fullscreen), while retaining status feedback for manual pointer, key, or touch toggles outside fullscreen. Caffeine's actual keep-awake state, fullscreen/media/app automation, settings, and installed files are not modified. Turning this option off or disabling Dynamic Island restores Caffeine's normal feedback. The integration was checked against Caffeine 61; unsupported versions are left untouched.
 
 ## Credits and licensing
 

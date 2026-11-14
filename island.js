@@ -121,6 +121,7 @@ class Island extends St.Widget {
         this._trackKey = null;
         this._indicators = new Map();
         this._toastActive = false;
+        this._notificationData = null;
         this._toastId = 0;
         this._hoverId = 0;
         this._timeline = null;
@@ -292,6 +293,7 @@ class Island extends St.Widget {
         this._avatar.connect('clicked', () => camera?.launch([], global.create_app_launch_context(0, -1)));
         this._body.insert_child_above(this._avatar, this._calendar);
 
+        this._createNotificationCard();
         this._createCoverDot();
         this._place();
         this._applyGeometry(this._compact());
@@ -469,6 +471,8 @@ class Island extends St.Widget {
     }
 
     vfunc_button_release_event(event) {
+        if (this._notificationData)
+            return Clutter.EVENT_PROPAGATE;
         if (event.get_button() !== Clutter.BUTTON_PRIMARY)
             return Clutter.EVENT_PROPAGATE;
         // First click opens the details, the next one opens the player
@@ -528,6 +532,84 @@ class Island extends St.Widget {
         });
         // This is a date summary, not an events feed: no calendar access required.
         this._calendarFooter.text = `▦  ${now.format('%A, %B %e')}`;
+    }
+
+    _createNotificationCard() {
+        this._notice = new St.BoxLayout({style_class: 'di-notice', visible: false});
+        const content = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, x_expand: true});
+        const open = new St.Button({style_class: 'di-notice-open', x_expand: true, can_focus: true});
+        const row = new St.BoxLayout({style_class: 'di-notice-row'});
+        this._noticeIcon = new St.Icon({style_class: 'di-notice-icon', y_align: Clutter.ActorAlign.START});
+        row.add_child(this._noticeIcon);
+        this._noticeText = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL, style_class: 'di-notice-text', width: 400});
+        this._noticeApp = new St.Label({style_class: 'di-notice-app'});
+        this._noticeTitle = new St.Label({style_class: 'di-notice-title'});
+        this._noticeBody = new St.Label({style_class: 'di-notice-body', height: 40});
+        for (const label of [this._noticeApp, this._noticeTitle, this._noticeBody])
+            label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        this._noticeBody.clutter_text.line_wrap = true;
+        this._noticeBody.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        this._noticeText.add_child(this._noticeApp);
+        this._noticeText.add_child(this._noticeTitle);
+        this._noticeText.add_child(this._noticeBody);
+        row.add_child(this._noticeText);
+        open.child = row;
+        open.connect('clicked', () => this._notificationData?.activate());
+        content.add_child(open);
+        this._noticeActions = new St.BoxLayout({style_class: 'di-notice-actions', visible: false});
+        content.add_child(this._noticeActions);
+        this._notice.add_child(content);
+        const close = new St.Button({
+            style_class: 'di-notice-close', can_focus: true, y_align: Clutter.ActorAlign.START,
+            accessible_name: 'Hide notification',
+            child: new St.Icon({icon_name: 'window-close-symbolic', icon_size: 14}),
+        });
+        close.connect('clicked', () => this._notificationData?.dismiss());
+        this._notice.add_child(close);
+        this._body.add_child(this._notice);
+    }
+
+    showNotification(data) {
+        if (this._destroying)
+            return;
+        if (!this._notificationData) {
+            this._notificationPreviousHidden = this._autoHidden;
+            this._notificationPreviousExpanded = this._expanded;
+        }
+        this._notificationData = data;
+        this._autoHidden = false;
+        this._cancelAutoHide();
+        this._noticeIcon.gicon = toGicon(data.icon);
+        this._noticeApp.text = String(data.app).slice(0, 80);
+        this._noticeTitle.text = String(data.title).slice(0, 200);
+        this._noticeBody.text = String(data.body).slice(0, 500);
+        this._noticeBody.visible = !!data.body;
+        for (const child of this._noticeActions.get_children())
+            child.destroy();
+        // Additional actions remain accessible from GNOME notification history.
+        for (const action of data.actions.slice(0, 3)) {
+            const button = new St.Button({style_class: 'di-notice-action', label: String(action.label).slice(0, 24), can_focus: true});
+            button.connect('clicked', () => action.activate());
+            this._noticeActions.add_child(button);
+        }
+        this._noticeActions.visible = data.actions.length > 0;
+        this._refresh();
+    }
+
+    hideNotification() {
+        if (!this._notificationData || this._destroying)
+            return;
+        this._notificationData = null;
+        this._autoHidden = this._notificationPreviousHidden && this._settings.get_boolean('auto-hide-enabled');
+        this._expanded = this._notificationPreviousExpanded;
+        this._refresh();
+        this._scheduleAutoHide();
+    }
+
+    _notificationGeometry() {
+        const monitorWidth = Main.layoutManager.primaryMonitor?.width ?? 800;
+        this._noticeText.width = Math.max(120, Math.min(400, monitorWidth - 190));
+        return {...this._expandedGeometry(), padding: [16 + (this._isNotch() ? Main.panel.height : 0), 42, 16, 42], spacing: 0};
     }
 
     _createCoverDot() {
@@ -616,7 +698,7 @@ class Island extends St.Widget {
 
     _scheduleAutoHide() {
         this._cancelAutoHide();
-        if (!this._settings.get_boolean('auto-hide-enabled') || this._autoHidden || this._pointerOnIsland())
+        if (!this._settings.get_boolean('auto-hide-enabled') || this._notificationData || this._autoHidden || this._pointerOnIsland())
             return;
         this._autoHideId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, this._settings.get_int('auto-hide-delay'), () => {
             this._autoHideId = 0;
@@ -631,6 +713,8 @@ class Island extends St.Widget {
     }
 
     _activity() {
+        if (this._notificationData)
+            this._notificationPreviousHidden = false;
         this._autoHidden = false;
         this._scheduleAutoHide();
     }
@@ -741,6 +825,8 @@ class Island extends St.Widget {
         // an in-flight morph or remeasure the whole dashboard for those signals.
         const renderKey = JSON.stringify([
             this._hasMusic, this._expanded, this._toastActive, this._position,
+            this._notificationData ? [this._noticeApp.text, this._noticeTitle.text, this._noticeBody.text,
+                this._notificationData.actions.map(action => action.label)] : null,
             this._title.text, this._artist.text, this._album.text,
             this._toastLabel.text, this._toastLabel.visible, this._toastBar.visible,
             [...this._indicators.values()].map(chip => chip._activityState),
@@ -753,9 +839,10 @@ class Island extends St.Widget {
         if (renderKey !== this._renderKey) {
             this._renderKey = renderKey;
             this._morph(() => {
-                const music = this._hasMusic && !this._toastActive;
+                const notification = !!this._notificationData;
+                const music = this._hasMusic && !this._toastActive && !notification;
                 const expanded = music && this._expanded;
-                const notch = this._isNotch() && !expanded;
+                const notch = this._isNotch() && !expanded && !notification;
                 this._art.visible = music && (expanded || this._settings.get_boolean('art-compact'));
                 this._artTile.visible = this._art.visible;
                 this._artBadge.visible = expanded;
@@ -767,20 +854,21 @@ class Island extends St.Widget {
                 this._controls.visible = expanded;
                 this._dashboardHeading.visible = false;
                 this._header.visible = expanded && this._settings.get_boolean('dashboard-header');
-                this._background.visible = expanded;
+                this._background.visible = expanded || notification;
                 this._avatar.visible = expanded && this._settings.get_boolean('dashboard-account');
                 this._setCachedStyle(this._body, `spacing: ${expanded ? 16 : SPACING}px;`);
                 this._calendar.visible = expanded && this._settings.get_boolean('dashboard-calendar');
-                if (expanded)
+                if (expanded || notification)
                     this.add_style_class_name('di-dashboard');
                 else
                     this.remove_style_class_name('di-dashboard');
                 this._eq.visible = music && !expanded;
-                this._indicatorBox.visible = !this._toastActive && hasIndicators;
-                this._toastBox.visible = this._toastActive;
+                this._indicatorBox.visible = !notification && !this._toastActive && hasIndicators;
+                this._toastBox.visible = !notification && this._toastActive;
+                this._notice.visible = notification;
             });
         }
-        this._setShown(!this._autoHidden && (this._hasMusic || hasIndicators || this._toastActive));
+        this._setShown(!this._autoHidden && (this._hasMusic || hasIndicators || this._toastActive || !!this._notificationData));
         this._fitSlot();
         this._syncCoverDot();
     }
@@ -889,6 +977,8 @@ class Island extends St.Widget {
     }
 
     _setExpanded(expanded) {
+        if (this._notificationData)
+            return;
         if (expanded === this._expanded)
             return;
         this._expanded = expanded;
@@ -920,7 +1010,8 @@ class Island extends St.Widget {
 
         this.set_size(-1, -1);
         change();
-        this._layout = this._expanded && this._hasMusic && !this._toastActive ? this._expandedGeometry() : this._compact();
+        this._layout = this._notificationData ? this._notificationGeometry()
+            : this._expanded && this._hasMusic && !this._toastActive ? this._expandedGeometry() : this._compact();
         const to = this._layout;
         this._applyGeometry(to);
         const [, toWidth] = this.get_preferred_width(-1);
@@ -975,7 +1066,7 @@ class Island extends St.Widget {
         const top = px(geometry.topRadius ?? geometry.radius);
         const bottom = px(geometry.radius);
         // Width 0 = size to content, below 0 is handled by the layouts; music layouts only, toasts keep their own size
-        const minWidth = this._hasMusic && !this._toastActive ? this._settings.get_int('width') : 0;
+        const minWidth = this._hasMusic && !this._toastActive && !this._notificationData ? this._settings.get_int('width') : 0;
         this._setCachedStyle(this._text, this._layout.expanded
             ? 'min-width: 160px; max-width: 160px; spacing: 4px;'
             : `max-width: ${this._settings.get_int('text-width')}px;`);

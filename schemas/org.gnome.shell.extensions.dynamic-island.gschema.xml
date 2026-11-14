@@ -117,6 +117,14 @@
       <default>'#ff6a00'</default>
       <summary>Visualizer color (#rrggbb)</summary>
     </key>
+    <key name="caffeine-manual-feedback" type="b">
+      <default>true</default>
+      <summary>Keep Caffeine automatic transitions silent and show feedback only for manual toggles outside fullscreen</summary>
+    </key>
+    <key name="show-notifications" type="b">
+      <default>true</default>
+      <summary>Show eligible app notification banners inside the island instead of native popups</summary>
+    </key>
     <key name="show-volume" type="b">
       <default>true</default>
       <summary>Show volume and brightness changes (replaces GNOME pop-up)</summary>
