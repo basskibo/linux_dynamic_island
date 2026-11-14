@@ -31,6 +31,8 @@ This is Yassine Mathlouthi's GNOME 50 fork of [Dynamic Island by basskibo / Boja
 
 The original MPRIS media support (Spotify, supported browsers, and other players), configurable positions/visualizers, and battery, Bluetooth, recording, and progress sources remain available.
 
+Charger notifications use UPower's actual power-source status, not whether the battery is currently charging. Full batteries and charge-limit pauses no longer imply a disconnected charger. Power changes settle for 1.5 seconds before a notification to filter brief firmware/UPower glitches.
+
 ## Compatibility
 
 - This fork targets **GNOME Shell 50**; it does not advertise compatibility with older Shell versions.
