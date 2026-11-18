@@ -139,6 +139,8 @@ class Island extends St.Widget {
         this._accent = accentGradient(settings.get_string('accent-color'));
 
         this._art = new St.Bin({style_class: 'di-art', y_align: Clutter.ActorAlign.CENTER, pivot_point: new Graphene.Point({x: 0.5, y: 0.5})});
+        this._artFallback = new St.Icon({icon_name: 'audio-x-generic-symbolic'});
+        this._art.child = this._artFallback;
         this.add_child(this._art);
 
         // Gap the clock shows through in notch mode
@@ -735,6 +737,11 @@ class Island extends St.Widget {
             this._playButton.child.gicon = icon(player.status === 'Playing' ? 'pause' : 'play');
             this._sourceIcon.gicon = toGicon(source.icon);
             this._artBadge.gicon = toGicon(source.icon);
+            const fallback = toGicon(source.artworkIcon ?? source.icon);
+            if (!this._artFallback.gicon?.equal(fallback)) {
+                this._artFallback.gicon = fallback;
+                this._coverDotFallback.gicon = fallback;
+            }
             this._sourceLabel.text = source.name;
             this._source.visible = this._expanded && !!source.name;
             const key = `${player.trackTitle}\n${player.trackArtists.join(', ')}\n${player.trackCoverUrl}`;
@@ -845,7 +852,7 @@ class Island extends St.Widget {
                 const notch = this._isNotch() && !expanded && !notification;
                 this._art.visible = music && (expanded || this._settings.get_boolean('art-compact'));
                 this._artTile.visible = this._art.visible;
-                this._artBadge.visible = expanded;
+                this._artBadge.visible = expanded && !!this._artBackground;
                 this._text.visible = music && !notch;
                 this._notch.visible = notch;
                 this._artist.visible = expanded;
@@ -1079,6 +1086,7 @@ class Island extends St.Widget {
         // another repaint here also uploaded its texture on unchanged frames.
         const artSize = Math.round(geometry.artSize);
         this._art.set_size(artSize, artSize);
+        this._artFallback.icon_size = Math.round(artSize * 0.72);
         this._artTile.set_size(artSize, artSize);
         this._art.set_position(0, 0);
         // Fixed coordinates avoid BinLayout centering the source icon.
@@ -1105,8 +1113,9 @@ class Island extends St.Widget {
 
     _setArt(url) {
         this._artUrl = url;
-        if (!url.startsWith('http')) {
-            this._setArtBackground(url.startsWith('file://') ? url : null);
+        if (!/^https?:\/\//i.test(url)) {
+            const local = url.startsWith('file://') && Gio.File.new_for_uri(url).query_exists(null);
+            this._setArtBackground(local ? url : null);
             return;
         }
         // St can't load remote images, so https covers (Spotify) are downloaded to a cache first
@@ -1117,6 +1126,7 @@ class Island extends St.Widget {
             this._setArtBackground(dest.get_uri());
             return;
         }
+        this._setArtBackground(null);
         Gio.File.new_for_uri(url).copy_async(dest, Gio.FileCopyFlags.OVERWRITE, GLib.PRIORITY_DEFAULT,
             this._artCancellable, null, (file, res) => {
                 try {
@@ -1135,6 +1145,8 @@ class Island extends St.Widget {
         this._artBackground = uri ? `background-image: url("${uri}");` : '';
         this._updateCoverDot();
         this._coverDotFallback.visible = !uri;
+        this._artFallback.visible = !uri;
+        this._artBadge.visible = !!uri && this._layout.expanded && !this._notificationData;
         this._applyGeometry(this._geometry);
     }
 

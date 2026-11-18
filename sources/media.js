@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import {MprisPlayer} from 'resource:///org/gnome/shell/ui/mpris.js';
 
@@ -15,9 +16,28 @@ function sourceOf(player) {
     const identity = player._mprisProxy?.Identity ?? '';
     const app = player.app ?? findApp(identity);
     const url = player._playerProxy?.Metadata?.['xesam:url']?.deepUnpack() ?? '';
+    let host = '';
+    try {
+        host = GLib.Uri.parse(url, GLib.UriFlags.NONE).get_host()?.toLowerCase() ?? '';
+    } catch {
+        // Browsers do not always expose the tab URL via MPRIS.
+    }
+    const matches = domain => host === domain || host.endsWith(`.${domain}`);
+    const browser = /firefox|librewolf|chrome|chromium|brave|vivaldi|edge|zen browser/i.test(`${identity} ${app?.get_name() ?? ''}`);
+    const titleMatches = name => browser && !host && new RegExp(`(?:^|[|–—-]\\s*)${name}$`, 'i').test(player.trackTitle?.trim() ?? '');
+    const messenger = matches('messenger.com') ||
+        (matches('facebook.com') && /^https?:\/\/[^/]+\/messages(?:[/?#]|$)/i.test(url)) || titleMatches('Messenger');
+    const facebook = matches('facebook.com') || matches('fb.com') || titleMatches('Facebook');
+    const siteIcon = messenger ? 'messenger' : facebook ? 'facebook' : null;
+    const icon = app?.get_icon() ?? 'audio-x-generic-symbolic';
+    const artworkIcon = siteIcon
+        ? new Gio.FileIcon({file: Gio.File.new_for_uri(import.meta.url).get_parent().get_parent().get_child('icons').get_child(`${siteIcon}.svg`)})
+        : icon;
     return {
-        name: /youtube\.com|youtu\.be/.test(url) ? 'YouTube' : app?.get_name() ?? identity,
-        icon: app?.get_icon() ?? 'audio-x-generic-symbolic',
+        name: messenger ? 'Messenger' : facebook ? 'Facebook' :
+            matches('youtube.com') || matches('youtu.be') ? 'YouTube' : app?.get_name() || identity,
+        icon,
+        artworkIcon,
     };
 }
 
