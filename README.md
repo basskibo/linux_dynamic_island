@@ -76,5 +76,5 @@ Translations live as standalone JSON files inside the `locales/` directory. To a
 ## Contributors
 
 - **[@basskibo](https://github.com/basskibo)** — Original Dynamic Island for GNOME extension, core MPRIS/OSD architecture, visualizers, and animations.
--- **Enes ([@droithim](https://github.com/droithim))** — Always-visible & idle modes, interactive expanded idle panel, Apple-inspired minimalist volume control, OSD takeover toggle, temporary dodge & custom permanent positioning, modular multi-language i18n (including Turkish), and GNOME 50 / Wayland stability fixes.
+- **Enes ([@droithim](https://github.com/droithim))** — Always-visible & idle modes, interactive expanded idle panel, Apple-inspired minimalist volume control, OSD takeover toggle, temporary dodge & custom permanent positioning, modular multi-language i18n (including Turkish), and GNOME 50 / Wayland stability fixes.
 
