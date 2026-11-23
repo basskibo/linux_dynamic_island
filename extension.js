@@ -1,5 +1,6 @@
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {initI18n, destroyI18n} from './i18n.js';
 import {Island} from './island.js';
 import {BatterySource} from './sources/battery.js';
 import {BluetoothSource} from './sources/bluetooth.js';
@@ -13,15 +14,24 @@ const SOURCES = [MediaSource, OsdSource, BatterySource, RecordingSource, Bluetoo
 export default class DynamicIslandExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
+        initI18n(this._settings);
         this._island = new Island(this._settings);
-        this._sources = SOURCES.map(Source => new Source(this._island, this._settings));
+        this._sources = [];
+        try {
+            SOURCES.forEach(Source => this._sources.push(new Source(this._island, this._settings)));
+        } catch (e) {
+            // The shell won't call disable() after a failed enable(), so the OSD patch and island would stay behind
+            this.disable();
+            throw e;
+        }
     }
 
     disable() {
-        this._sources.forEach(source => source.destroy());
+        this._sources?.forEach(source => source.destroy());
         this._sources = null;
-        this._island.destroy();
+        this._island?.destroy();
         this._island = null;
+        destroyI18n();
         this._settings = null;
     }
 }

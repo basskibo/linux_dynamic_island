@@ -2,6 +2,8 @@ import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import {MprisPlayer} from 'resource:///org/gnome/shell/ui/mpris.js';
 
+import {pickPlayer} from './pick.js';
+
 const MPRIS_PREFIX = 'org.mpris.MediaPlayer2.';
 
 const findApp = name => {
@@ -38,22 +40,45 @@ export class MediaSource {
             'NameOwnerChanged', '/org/freedesktop/DBus', 'org.mpris.MediaPlayer2',
             Gio.DBusSignalFlags.MATCH_ARG0_NAMESPACE, (connection, sender, path, iface, signal, params) => {
                 const [name, oldOwner, newOwner] = params.deepUnpack();
-                if (newOwner && !oldOwner)
+                if (oldOwner)
+                    this._removePlayer(name);
+                if (newOwner)
                     this._addPlayer(name);
             });
     }
 
     destroy() {
         Gio.DBus.session.signal_unsubscribe(this._nameOwnerSub);
-        for (const {player, handlerIds} of this._players.values())
-            handlerIds.forEach(id => player.disconnect(id));
+        for (const entry of this._players.values())
+            this._release(entry);
         this._players = null;
         this._current = null;
         this._island = null;
     }
 
-    _update() {
+    _update(changed = null) {
+        this._current = pickPlayer([...this._players.values()].map(entry => entry.player), this._current, changed);
         this._island.setPlayer(this._current, this._current && sourceOf(this._current));
+    }
+
+    _release({player, handlerIds}) {
+        handlerIds.forEach(id => player.disconnect(id));
+        // MprisPlayer has no destroy and these keep it alive, one more copy per lock screen.
+        // Not via _close(): it nulls the proxies, which throws in a ready callback still pending.
+        player._mprisProxy?.disconnectObject(player);
+        player._playerProxy?.disconnectObject(player);
+    }
+
+    // The bus is watched directly because GNOME 48 removed MprisPlayer's 'closed' signal
+    _removePlayer(busName) {
+        const entry = this._players.get(busName);
+        if (!entry)
+            return;
+        this._players.delete(busName);
+        this._release(entry);
+        if (this._current === entry.player)
+            this._current = null;
+        this._update();
     }
 
     _addPlayer(busName) {
@@ -61,22 +86,7 @@ export class MediaSource {
         if (!this._players || this._players.has(busName))
             return;
         const player = new MprisPlayer(busName);
-        const handlerIds = [
-            player.connect('changed', () => {
-                // A player that starts playing takes over the island
-                if (player.status === 'Playing' || !this._current)
-                    this._current = player;
-                this._update();
-            }),
-            player.connect('closed', () => {
-                this._players.delete(busName);
-                if (this._current === player) {
-                    const rest = [...this._players.values()].map(entry => entry.player);
-                    this._current = rest.find(p => p.status === 'Playing') ?? rest[0] ?? null;
-                }
-                this._update();
-            }),
-        ];
+        const handlerIds = [player.connect('changed', () => this._update(player))];
         this._players.set(busName, {player, handlerIds});
     }
 }
