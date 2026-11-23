@@ -1,6 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.gnome.shell.extensions.dynamic-island" path="/org/gnome/shell/extensions/dynamic-island/">
+    <key name="language" type="s">
+      <default>'auto'</default>
+      <summary>Interface language ('auto' follows the system language, or a locale code such as 'en' or 'tr')</summary>
+    </key>
+    <key name="always-visible" type="b">
+      <default>false</default>
+      <summary>Keep the island visible as a compact pill even when nothing is active</summary>
+    </key>
+    <key name="idle-content" type="s">
+      <choices>
+        <choice value="empty"/><choice value="clock"/><choice value="icon"/>
+      </choices>
+      <default>'empty'</default>
+      <summary>Content shown inside the island when idle and always visible</summary>
+    </key>
+    <key name="idle-icon-path" type="s">
+      <default>''</default>
+      <summary>Path to a custom SVG or PNG icon used in minimal icon idle mode (empty uses default)</summary>
+    </key>
+    <key name="idle-expand-clock" type="b">
+      <default>true</default>
+      <summary>Show large clock and full date when the idle island is expanded</summary>
+    </key>
+    <key name="idle-expand-icon" type="b">
+      <default>true</default>
+      <summary>Show enlarged minimal or custom icon when the idle island is expanded</summary>
+    </key>
+    <key name="idle-expand-battery" type="b">
+      <default>true</default>
+      <summary>Show live battery status when the idle island is expanded (auto-hidden on desktops)</summary>
+    </key>
+    <key name="idle-expand-bluetooth" type="b">
+      <default>true</default>
+      <summary>Show live Bluetooth status when the idle island is expanded</summary>
+    </key>
+    <key name="idle-expand-volume" type="b">
+      <default>true</default>
+      <summary>Show quick volume slider when the idle island is expanded</summary>
+    </key>
     <key name="position" type="s">
       <choices>
         <choice value="top-center"/><choice value="top-left"/><choice value="top-right"/>
@@ -65,6 +104,29 @@
       </choices>
       <default>'hover'</default>
       <summary>What opens the details view</summary>
+    </key>
+    <key name="dodge-duration" type="i">
+      <range min="1" max="60"/>
+      <default>5</default>
+      <summary>Seconds before the island silently returns to its home position after a temporary dodge</summary>
+    </key>
+    <key name="positioning-active" type="b">
+      <default>false</default>
+      <summary>Temporary placement mode triggered from Preferences to choose a permanent custom position</summary>
+    </key>
+    <key name="pin-active" type="b">
+      <default>false</default>
+      <summary>Whether a custom permanent position offset is currently saved</summary>
+    </key>
+    <key name="pin-offset-x" type="i">
+      <range min="-10000" max="10000"/>
+      <default>0</default>
+      <summary>Horizontal offset (px) of the saved custom island position</summary>
+    </key>
+    <key name="pin-offset-y" type="i">
+      <range min="-10000" max="10000"/>
+      <default>0</default>
+      <summary>Vertical offset (px) of the saved custom island position</summary>
     </key>
     <key name="eq-style" type="s">
       <choices>

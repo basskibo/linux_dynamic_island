@@ -1,5 +1,7 @@
 import Gio from 'gi://Gio';
 
+import {t} from '../i18n.js';
+
 const GREEN = '#30d158';
 // UPower device states that mean "on AC power": charging, fully charged, pending charge
 const PLUGGED = [1, 4, 5];
@@ -23,6 +25,7 @@ export class BatterySource {
                 }
                 this._lastState = this._proxy.get_cached_property('State')?.unpack();
                 this._proxy.connectObject('g-properties-changed', () => this._onChanged(), this);
+                this._pushStatus();
             });
     }
 
@@ -35,7 +38,28 @@ export class BatterySource {
         this._settings = null;
     }
 
+    _pushStatus() {
+        if (!this._proxy || !this._island)
+            return;
+        const state = this._proxy.get_cached_property('State')?.unpack() ?? 0;
+        const isPresent = this._proxy.get_cached_property('IsPresent')?.unpack();
+        // Desktops report no battery (state 0 or IsPresent false)
+        if (!state || isPresent === false) {
+            this._island.setBatteryStatus(null);
+            return;
+        }
+        const percent = Math.round(this._proxy.get_cached_property('Percentage')?.unpack() ?? 0);
+        const icon = this._proxy.get_cached_property('IconName')?.unpack() || 'battery-symbolic';
+        this._island.setBatteryStatus({
+            percent,
+            icon,
+            charging: PLUGGED.includes(state),
+            fullyCharged: state === 4,
+        });
+    }
+
     _onChanged() {
+        this._pushStatus();
         const state = this._proxy.get_cached_property('State')?.unpack();
         const percent = Math.round(this._proxy.get_cached_property('Percentage')?.unpack() ?? 0);
         const icon = this._proxy.get_cached_property('IconName')?.unpack() || 'battery-symbolic';
@@ -46,8 +70,8 @@ export class BatterySource {
             return;
         const plugged = PLUGGED.includes(state);
         if (state === 4 && previous === 1)
-            this._island.toast(icon, `Fully charged · ${percent}%`, {color: GREEN});
+            this._island.toast(icon, t('battery.fullyCharged', {percent}), {color: GREEN});
         else if (plugged !== PLUGGED.includes(previous))
-            this._island.toast(icon, `${plugged ? 'Charging' : 'On battery'} · ${percent}%`, {color: plugged ? GREEN : null, level: percent / 100});
+            this._island.toast(icon, t(plugged ? 'battery.charging' : 'battery.onBattery', {percent}), {color: plugged ? GREEN : null, level: percent / 100});
     }
 }

@@ -18,6 +18,35 @@
 .di-chip-label { color: #fff; font-weight: bold; font-size: 10pt; font-feature-settings: "tnum"; }
 .di-toast { spacing: 12px; padding: 0 4px 0 6px; min-height: 26px; }
 .di-toast-icon { icon-size: 22px; color: #fff; }
-.di-toast-label { color: #fff; font-weight: bold; font-size: 10pt; max-width: 300px; }
+.di-toast-label { color: #fff; font-weight: bold; font-size: 10pt; max-width: 420px; }
 .di-level { height: 8px; border-radius: 4px; background-color: rgba(255,255,255,0.2); }
 .di-level-fill { height: 8px; border-radius: 4px; background-color: #fff; }
+.di-idle-clock { color: #fff; font-weight: bold; font-size: 10pt; font-feature-settings: "tnum"; }
+.di-idle-icon { icon-size: 16px; color: rgba(255,255,255,0.78); }
+.di-idle-expanded { spacing: 18px; }
+.di-idle-expanded-text { spacing: 2px; }
+.di-idle-expanded-clock { color: #fff; font-weight: 800; font-size: 23pt; letter-spacing: -0.5px; font-feature-settings: "tnum"; }
+.di-idle-expanded-date { color: #a1a1a6; font-size: 9.5pt; font-weight: 500; }
+.di-idle-expanded-icon-wrap { background-color: rgba(255,255,255,0.08); border-radius: 14px; padding: 8px; }
+.di-idle-expanded-icon { icon-size: 38px; color: rgba(255,255,255,0.92); }
+.di-idle-status { spacing: 6px; }
+.di-idle-status-row { spacing: 6px; background-color: rgba(255,255,255,0.08); border-radius: 999px; padding: 4px 10px; }
+.di-idle-status-icon { icon-size: 14px; color: #fff; }
+.di-idle-status-label { color: #f2f2f7; font-size: 9pt; font-weight: 600; font-feature-settings: "tnum"; max-width: 150px; }
+.di-idle-status-dim { color: #a1a1a6; }
+.di-volume-row { spacing: 10px; min-height: 22px; min-width: 220px; padding: 0 2px; }
+.di-vol-btn { padding: 3px; border-radius: 999px; }
+.di-vol-btn:hover { background-color: rgba(255,255,255,0.12); }
+.di-vol-btn:active { background-color: rgba(255,255,255,0.20); }
+.di-vol-btn StIcon { icon-size: 16px; color: rgba(255,255,255,0.88); }
+.di-vol-btn:hover StIcon { color: #fff; }
+.di-vol-track { height: 6px; border-radius: 999px; background-color: #2c2c2e; }
+.di-vol-track-active { height: 7px; border-radius: 999px; background-color: #3a3a3c; }
+.di-vol-fill { border-radius: 999px; background-color: rgba(255,255,255,0.92); }
+.di-vol-track-active .di-vol-fill { background-color: #fff; }
+.di-vol-percent { color: rgba(255,255,255,0.62); font-size: 8.5pt; font-weight: 600; font-feature-settings: "tnum"; min-width: 36px; text-align: right; }
+.di-vol-percent-active { color: rgba(255,255,255,0.88); }
+.di-positioning { border: 2px solid #0a84ff; }
+.di-positioning-hint { spacing: 6px; padding: 0 8px; min-height: 26px; }
+.di-positioning-icon { icon-size: 15px; color: #0a84ff; }
+.di-positioning-label { color: #fff; font-weight: 600; font-size: 9.5pt; }
